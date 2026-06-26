@@ -27,45 +27,29 @@ function SignupPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Custom password strength logic (rule-based)
   const passwordStrength = useMemo(() => {
-    if (!password) return { score: 0, label: "", color: "bg-muted" };
-    
+    if (!password) return { score: 0, label: "", color: "var(--divider)" };
     let score = 0;
     if (password.length >= 6) score += 1;
     if (password.length >= 8) score += 1;
-    
-    const hasLetters = /[a-zA-Z]/.test(password);
-    const hasNumbers = /[0-9]/.test(password);
-    const hasSpecial = /[^A-Za-z0-9]/.test(password);
-    
-    if (hasLetters && hasNumbers) score += 1;
-    if (hasSpecial) score += 1;
-
-    if (score <= 1) {
-      return { score: 1, label: "Weak", color: "bg-risk" };
-    } else if (score <= 3) {
-      return { score: 2, label: "Fair", color: "bg-warning" };
-    } else {
-      return { score: 3, label: "Strong", color: "bg-success" };
-    }
+    if (/[a-zA-Z]/.test(password) && /[0-9]/.test(password)) score += 1;
+    if (/[^A-Za-z0-9]/.test(password)) score += 1;
+    if (score <= 1) return { score: 1, label: "Weak", color: "#ef4444" };
+    if (score <= 3) return { score: 2, label: "Fair", color: "#f59e0b" };
+    return { score: 3, label: "Strong", color: "#22c55e" };
   }, [password]);
 
   async function handleSignUp(e: React.FormEvent) {
     e.preventDefault();
     if (!email || !password || !confirmPassword || !displayName) return;
-    
     if (password !== confirmPassword) {
       setError("Passwords do not match.");
       return;
     }
-    
     setLoading(true);
     setError(null);
-
     try {
       const { error } = await signUp(email, password, displayName);
-
       if (error) {
         setError(error.message || "Failed to create account.");
       } else {
@@ -78,24 +62,81 @@ function SignupPage() {
     }
   }
 
+  const inputStyle: React.CSSProperties = {
+    width: "100%",
+    padding: "12px 14px",
+    background: "var(--bg-input)",
+    border: "1px solid var(--border-input)",
+    borderRadius: "10px",
+    color: "var(--text-primary)",
+    fontSize: "14px",
+    outline: "none",
+    fontFamily: "inherit",
+    boxSizing: "border-box",
+    transition: "border-color 0.2s, box-shadow 0.2s",
+  };
+  const labelStyle: React.CSSProperties = {
+    display: "block",
+    fontSize: "9px",
+    letterSpacing: "0.15em",
+    color: "var(--text-muted)",
+    textTransform: "uppercase",
+    fontWeight: 500,
+    marginBottom: "8px",
+  };
+  const focusOn = (e: React.FocusEvent<HTMLInputElement>) => {
+    e.currentTarget.style.borderColor = "var(--border-accent)";
+    e.currentTarget.style.boxShadow = "0 0 0 3px rgba(124,58,237,0.08)";
+  };
+  const focusOff = (e: React.FocusEvent<HTMLInputElement>) => {
+    e.currentTarget.style.borderColor = "var(--border-input)";
+    e.currentTarget.style.boxShadow = "none";
+  };
+
   return (
     <AppShell hideNav>
-      <div className="flex min-h-[calc(100vh-4rem)] items-center justify-center px-5 py-12">
-        <div className="w-full max-w-[400px] rounded-2xl border border-border bg-card p-8 shadow-[var(--shadow-soft)] ring-1 ring-black/5">
-          <div className="text-center mb-6">
-            <h1 className="text-3xl font-bold tracking-tight text-primary">
+      <div
+        style={{
+          minHeight: "calc(100vh - 56px)",
+          background: "var(--bg)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          padding: "40px 20px",
+          transition: "var(--transition)",
+        }}
+      >
+        <div
+          style={{
+            width: "100%",
+            maxWidth: "400px",
+            background: "var(--bg-card)",
+            border: "1px solid var(--border-card)",
+            borderRadius: "16px",
+            padding: "40px",
+            transition: "var(--transition)",
+          }}
+        >
+          <div style={{ textAlign: "center", marginBottom: "28px" }}>
+            <h1
+              style={{
+                fontSize: "26px",
+                fontWeight: 700,
+                color: "var(--text-primary)",
+                letterSpacing: "-0.02em",
+                marginBottom: "8px",
+              }}
+            >
               Create account
             </h1>
-            <p className="mt-2 text-sm text-muted-foreground">
+            <p style={{ fontSize: "13px", color: "var(--text-muted)" }}>
               Start mapping your second brain.
             </p>
           </div>
 
-          <form onSubmit={handleSignUp} className="space-y-4">
+          <form onSubmit={handleSignUp} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
             <div>
-              <label htmlFor="displayName" className="block text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5">
-                Display Name
-              </label>
+              <label htmlFor="displayName" style={labelStyle}>Display Name</label>
               <input
                 id="displayName"
                 type="text"
@@ -104,14 +145,14 @@ function SignupPage() {
                 value={displayName}
                 onChange={(e) => setDisplayName(e.target.value)}
                 placeholder="Alex"
-                className="w-full rounded-xl border border-border bg-background px-4 py-3 text-sm focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-50"
+                style={{ ...inputStyle, opacity: loading ? 0.5 : 1 }}
+                onFocus={focusOn}
+                onBlur={focusOff}
               />
             </div>
 
             <div>
-              <label htmlFor="email" className="block text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5">
-                Email Address
-              </label>
+              <label htmlFor="email" style={labelStyle}>Email Address</label>
               <input
                 id="email"
                 type="email"
@@ -120,15 +161,15 @@ function SignupPage() {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="you@example.com"
-                className="w-full rounded-xl border border-border bg-background px-4 py-3 text-sm focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-50"
+                style={{ ...inputStyle, opacity: loading ? 0.5 : 1 }}
+                onFocus={focusOn}
+                onBlur={focusOff}
               />
             </div>
 
             <div>
-              <label htmlFor="password" className="block text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5">
-                Password
-              </label>
-              <div className="relative">
+              <label htmlFor="password" style={labelStyle}>Password</label>
+              <div style={{ position: "relative" }}>
                 <input
                   id="password"
                   type={showPassword ? "text" : "password"}
@@ -137,28 +178,62 @@ function SignupPage() {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="••••••••"
-                  className="w-full rounded-xl border border-border bg-background pl-4 pr-11 py-3 text-sm focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-50"
+                  style={{ ...inputStyle, paddingRight: "44px", opacity: loading ? 0.5 : 1 }}
+                  onFocus={focusOn}
+                  onBlur={focusOff}
                 />
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                  style={{
+                    position: "absolute",
+                    right: "12px",
+                    top: "50%",
+                    transform: "translateY(-50%)",
+                    color: "var(--text-muted)",
+                    background: "none",
+                    border: "none",
+                    cursor: "pointer",
+                    padding: 0,
+                  }}
                 >
-                  {showPassword ? <EyeOff className="w-4.5 h-4.5" /> : <Eye className="w-4.5 h-4.5" />}
+                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                 </button>
               </div>
+
               {password && (
-                <div className="mt-2">
-                  <div className="flex justify-between items-center text-[10px] font-semibold text-muted-foreground mb-1 uppercase tracking-wider">
-                    <span>Password Strength:</span>
-                    <span className={passwordStrength.score === 1 ? "text-risk" : passwordStrength.score === 2 ? "text-warning" : "text-success"}>
-                      {passwordStrength.label}
-                    </span>
+                <div style={{ marginTop: "8px" }}>
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      fontSize: "10px",
+                      color: "var(--text-muted)",
+                      marginBottom: "4px",
+                      textTransform: "uppercase",
+                      letterSpacing: "0.1em",
+                      fontWeight: 500,
+                    }}
+                  >
+                    <span>Strength</span>
+                    <span style={{ color: passwordStrength.color }}>{passwordStrength.label}</span>
                   </div>
-                  <div className="h-1.5 w-full bg-muted rounded-full overflow-hidden">
+                  <div
+                    style={{
+                      height: "3px",
+                      background: "var(--border-input)",
+                      borderRadius: "2px",
+                      overflow: "hidden",
+                    }}
+                  >
                     <div
-                      className={`h-full transition-all duration-300 ${passwordStrength.color}`}
-                      style={{ width: `${(passwordStrength.score / 3) * 100}%` }}
+                      style={{
+                        height: "100%",
+                        width: `${(passwordStrength.score / 3) * 100}%`,
+                        background: passwordStrength.color,
+                        borderRadius: "2px",
+                        transition: "width 0.3s",
+                      }}
                     />
                   </div>
                 </div>
@@ -166,9 +241,7 @@ function SignupPage() {
             </div>
 
             <div>
-              <label htmlFor="confirmPassword" className="block text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5">
-                Confirm Password
-              </label>
+              <label htmlFor="confirmPassword" style={labelStyle}>Confirm Password</label>
               <input
                 id="confirmPassword"
                 type={showPassword ? "text" : "password"}
@@ -177,12 +250,23 @@ function SignupPage() {
                 value={confirmPassword}
                 onChange={(e) => setConfirmPassword(e.target.value)}
                 placeholder="••••••••"
-                className="w-full rounded-xl border border-border bg-background px-4 py-3 text-sm focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-50"
+                style={{ ...inputStyle, opacity: loading ? 0.5 : 1 }}
+                onFocus={focusOn}
+                onBlur={focusOff}
               />
             </div>
 
             {error && (
-              <div className="rounded-lg border border-risk/30 bg-risk/5 px-4 py-3 text-xs text-risk leading-relaxed">
+              <div
+                style={{
+                  background: "var(--badge-high-bg)",
+                  border: "1px solid var(--badge-high-fg)",
+                  borderRadius: "8px",
+                  padding: "10px 14px",
+                  fontSize: "12px",
+                  color: "var(--badge-high-fg)",
+                }}
+              >
                 {error}
               </div>
             )}
@@ -190,17 +274,30 @@ function SignupPage() {
             <button
               type="submit"
               disabled={loading}
-              className="w-full flex justify-center items-center gap-2 rounded-xl py-3 text-sm font-semibold text-primary-foreground disabled:opacity-50 shadow-[var(--shadow-glow)] hover:scale-[1.01] active:scale-[0.99] transition-transform"
-              style={{ background: "var(--gradient-primary)" }}
+              className="btn-primary"
+              style={{ justifyContent: "center", width: "100%", marginTop: "4px", opacity: loading ? 0.6 : 1 }}
             >
               {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
               Create account
             </button>
           </form>
 
-          <p className="mt-8 text-center text-xs text-muted-foreground font-medium">
+          <p
+            style={{
+              marginTop: "28px",
+              textAlign: "center",
+              fontSize: "12px",
+              color: "var(--text-muted)",
+            }}
+          >
             Already have an account?{" "}
-            <Link to="/login" search={{ redirect }} className="text-primary hover:underline">
+            <Link
+              to="/login"
+              search={{ redirect }}
+              style={{ color: "var(--text-secondary)", textDecoration: "none", transition: "color 0.15s" }}
+              onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.color = "var(--text-primary)")}
+              onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.color = "var(--text-secondary)")}
+            >
               Sign in
             </Link>
           </p>

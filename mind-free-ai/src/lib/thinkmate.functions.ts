@@ -21,6 +21,7 @@ const TaskSchema = z.object({
   estimatedMinutes: z.number().int().nonnegative(),
   dependencies: z.array(z.string()).default([]),
   rationale: z.string().optional(),
+  blockerQuestion: z.string().nullable().optional(),
 });
 
 const AnalysisSchema = z.object({
@@ -391,6 +392,14 @@ const AkinatorQuestionSchema = z.object({
   quickOptions: z.array(z.string()).optional(),
 });
 
+const MoodProfileSchema = z.object({
+  stressLevel: z.enum(["low", "moderate", "high", "crisis"]),
+  emotionalState: z.enum(["anxious", "overwhelmed", "determined", "fatigued", "focused", "avoidant", "neutral"]),
+  toneSignals: z.array(z.string()),
+  recommendedMode: z.enum(["execution", "triage", "rest", "clarity"]),
+  detectedAt: z.number(),
+});
+
 const AkinatorResultSchema = z.object({
   type: z.literal("result"),
   tasks: z.array(TaskSchema),
@@ -407,6 +416,7 @@ const AkinatorResultSchema = z.object({
     reason: z.string(),
   })),
   sessionSummary: z.string(),
+  moodProfile: MoodProfileSchema.optional().nullable(),
 });
 
 export type AkinatorQuestion = z.infer<typeof AkinatorQuestionSchema>;
@@ -428,7 +438,83 @@ export const conductBrainDumpSession = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const qCount = data.conversationHistory.length;
 
-    const systemPrompt = `You are ThinkMate AI — a calm, focused personal thinking partner.
+    // --- FEATURE 3: PRE-PASS TONE ANALYSIS ---
+    let toneAnalysis: any = null;
+    if (data.action === "finalize" || qCount >= 5) {
+      try {
+        const toneSystemPrompt = `Analyze the emotional tone of this text in 3 dimensions.
+Return ONLY valid JSON, no prose:
+{
+  "stressLevel": "low" | "moderate" | "high" | "crisis",
+  "emotionalState": "anxious" | "overwhelmed" | "determined" | "fatigued" | "focused" | "avoidant" | "neutral",
+  "toneSignals": string[], // max 3 phrases that led to this classification
+  "recommendedMode": "execution" | "triage" | "rest" | "clarity"
+}
+Base this purely on linguistic signals: word choice, sentence length, punctuation density, hedging language, urgency markers, emotional vocabulary.`;
+
+        const toneResult = await callGateway(
+          [
+            { role: "system", content: toneSystemPrompt },
+            { role: "user", content: `Analyze the tone of this brain dump: "${data.brainDump}"` }
+          ],
+          {
+            name: "submit_tone_analysis",
+            description: "Submit the emotional tone analysis results.",
+            parameters: {
+              type: "object",
+              required: ["stressLevel", "emotionalState", "toneSignals", "recommendedMode"],
+              properties: {
+                stressLevel: { type: "string", enum: ["low", "moderate", "high", "crisis"] },
+                emotionalState: { type: "string", enum: ["anxious", "overwhelmed", "determined", "fatigued", "focused", "avoidant", "neutral"] },
+                toneSignals: { type: "array", items: { type: "string" } },
+                recommendedMode: { type: "string", enum: ["execution", "triage", "rest", "clarity"] }
+              }
+            }
+          }
+        );
+        toneAnalysis = toneResult;
+      } catch (err) {
+        console.error("Tone analysis pre-pass failed:", err);
+      }
+    }
+
+    let formulaInstructions = "Calculate Mental Load Score (0-100) using Standard mode: task_volume 25%, deadline_pressure 30%, dependency 15%, decision_count 20%, context_switching 10%.";
+    let emotionalContext = "";
+
+    if (toneAnalysis) {
+      if (toneAnalysis.emotionalState === "overwhelmed" || toneAnalysis.emotionalState === "anxious") {
+        formulaInstructions = "Calculate Mental Load Score using Overwhelmed mode: task_volume 15%, deadline_pressure 25%, dependency 10%, decision_count 35% (decisions cause overload), context_switching 15%. Recommend maximum 2 tasks. Tone should be extremely soothing.";
+      } else if (toneAnalysis.emotionalState === "fatigued") {
+        formulaInstructions = "Calculate Mental Load Score using Fatigued mode: task_volume 20%, deadline_pressure 40% (deadlines matter most when energy is low), dependency 20%, decision_count 10% (skip decisions today), context_switching 10%. Recommend maximum 2 tasks.";
+      } else if (toneAnalysis.emotionalState === "determined" || toneAnalysis.emotionalState === "focused") {
+        formulaInstructions = "Calculate Mental Load Score using Determined mode: task_volume 30%, deadline_pressure 25%, dependency 20%, decision_count 15%, context_switching 10%. Standard execution mode.";
+      } else if (toneAnalysis.emotionalState === "avoidant") {
+        formulaInstructions = "Calculate Mental Load Score using Avoidant mode: task_volume 10%, deadline_pressure 45% (force deadline focus), dependency 15%, decision_count 20%, context_switching 10%. Prioritize deadline urgency to combat procrastination.";
+      }
+
+      emotionalContext = `
+[MOOD MODE ACTIVE]
+User's detected emotional state: ${toneAnalysis.emotionalState}
+Recommended mode: ${toneAnalysis.recommendedMode}
+Tone signals detected: ${toneAnalysis.toneSignals.join(", ")}
+Mental Load Calculation weighting updates: ${formulaInstructions}
+Adjust task prioritization, recommendations, and the tone of rationale accordingly. 
+If in 'rest' mode (recommendedMode === 'rest' or emotionalState === 'fatigued'), recommend maximum 2 tasks.
+If in 'crisis' mode (recommendedMode === 'triage' or stressLevel === 'crisis'), recommend only 1 task.
+`;
+    }
+
+    const procrastinationPrompt = `
+[PROCRASTINATION TRACKING ACTIVE]
+For tasks where the user is expressing avoidance, anxiety, delay, or procrastination, you must generate:
+- blockerQuestion: a single empathetic, non-judgmental question that helps the user identify what is actually stopping them. Examples:
+  - "Is this task unclear, scary, or just boring?"
+  - "What would need to be true for you to start this today?"
+  - "Is there a smaller version of this you could do in 5 minutes?"
+Never use the word lazy. Never guilt-trip. Keep it supportive and grounding.
+`;
+
+    const baseSystemPrompt = `You are ThinkMate AI — a calm, focused personal thinking partner.
 Your goal is to conduct an interactive questioning loop (maximum 5 questions) to clarify the user's brain dump before rendering their tasks and mental load score.
 
 RULES FOR FLOW:
@@ -446,7 +532,7 @@ RULES FOR FLOW:
 5. If returning a "result":
    - Extract tasks from the dump and the conversation history.
    - For each task, map details to quadrant (do_now, schedule, delegate, ignore), priority (high, medium, low), and estimatedMinutes.
-   - Calculate mentalLoadScore: tasks count 30%, urgent tasks 40%, high-stakes decisions 20%, interdependencies 10%.
+   - ${formulaInstructions}
    - Suggest exactly ONE recommendedNextStep (task title, reason, estimated minutes).
    - Write a sessionSummary (2-3 sentences summarizing key insights from this conversation).
    - Write classificationExplanations (an array matching each task title with its quadrant and a 1-2 sentence explanation of WHY it was placed there).
@@ -457,6 +543,8 @@ IMPORTANT STRUCTURE REQUIREMENT:
 All fields are strictly required by the output schema:
 - If returning a "question" type, you must provide real values for 'type', 'questionNumber', 'question', and 'hint'. For the result properties, you MUST return dummy values: tasks = [], mentalLoadScore = 0, riskLevel = "low", recommendedNextStep = {task: "", reason: "", estimatedMinutes: 0}, classificationExplanations = [], sessionSummary = "".
 - If returning a "result" type, you must provide real values for 'type', 'tasks', 'mentalLoadScore', 'riskLevel', 'recommendedNextStep', 'classificationExplanations', and 'sessionSummary'. For the question properties, you MUST return dummy values: questionNumber = 0, question = "", hint = "", quickOptions = [].`;
+
+    const systemPrompt = baseSystemPrompt + (emotionalContext ? `\n\n${emotionalContext}` : "") + `\n\n${procrastinationPrompt}`;
 
     const result = await callGateway(
       [
@@ -501,6 +589,7 @@ All fields are strictly required by the output schema:
                   estimatedMinutes: { type: "integer", minimum: 0 },
                   dependencies: { type: "array", items: { type: "string" } },
                   rationale: { type: "string" },
+                  blockerQuestion: { type: "string", description: "Empathetic question if user is procrastinating on this task, else null." }
                 },
               },
             },
@@ -536,6 +625,12 @@ All fields are strictly required by the output schema:
     if (result.type === "question") {
       return AkinatorQuestionSchema.parse(result);
     } else {
+      if (toneAnalysis) {
+        result.moodProfile = {
+          ...toneAnalysis,
+          detectedAt: Date.now()
+        };
+      }
       return AkinatorResultSchema.parse(result);
     }
   });

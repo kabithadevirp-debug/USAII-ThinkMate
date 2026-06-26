@@ -31,7 +31,7 @@ type RecapState = {
 };
 
 function ReflectPage() {
-  const { state, toggleTask, addTask } = useThinkMate();
+  const { state, toggleTask, addTask, saveCommitment } = useThinkMate();
   const getRecap = useServerFn(generateReflection);
 
   const [journal, setJournal] = useState("");
@@ -39,15 +39,27 @@ function ReflectPage() {
   const [error, setError] = useState<string | null>(null);
   const [recap, setRecap] = useState<RecapState | null>(null);
   const [pushedTasks, setPushedTasks] = useState<Record<string, boolean>>({});
+  const [commitmentInput, setCommitmentInput] = useState("");
+  const [commitmentSaved, setCommitmentSaved] = useState(false);
 
-  // Format today's date
+  useEffect(() => {
+    if (recap && recap.tomorrowFocus) {
+      setCommitmentInput(recap.tomorrowFocus);
+    }
+  }, [recap]);
+
+  const handleSaveCommitment = () => {
+    if (!commitmentInput.trim()) return;
+    saveCommitment(commitmentInput.trim());
+    setCommitmentSaved(true);
+  };
+
   const dateStr = new Date().toLocaleDateString("en-US", {
     weekday: "long",
     day: "numeric",
     month: "long",
   });
 
-  // Pull existing reflection on mount if available
   useEffect(() => {
     if (typeof window !== "undefined") {
       try {
@@ -55,7 +67,7 @@ function ReflectPage() {
         if (cached) {
           const list = JSON.parse(cached);
           if (list && list.length > 0) {
-            // Can display latest if we want, but usually reflection is created per session.
+            // Can display latest if we want
           }
         }
       } catch (e) {
@@ -67,19 +79,31 @@ function ReflectPage() {
   if (state.tasks.length === 0) {
     return (
       <AppShell>
-        <div className="mx-auto max-w-xl px-5 py-24 text-center">
-          <div className="mx-auto w-16 h-16 rounded-2xl grid place-items-center bg-primary/10 text-primary mb-6">
-            <Moon className="w-7 h-7" />
+        <div style={{ minHeight: "calc(100vh - 56px)", background: "var(--bg)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <div style={{ textAlign: "center", maxWidth: "380px", padding: "0 20px" }}>
+            <div
+              style={{
+                width: "60px",
+                height: "60px",
+                borderRadius: "14px",
+                background: "var(--accent-bg)",
+                border: "1px solid var(--accent-border)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                margin: "0 auto 20px",
+              }}
+            >
+              <Moon className="w-7 h-7" style={{ color: "var(--accent-light)" }} />
+            </div>
+            <h1 style={{ fontSize: "26px", fontWeight: 700, color: "var(--text-primary)", marginBottom: "10px" }}>Nothing to reflect on yet</h1>
+            <p style={{ fontSize: "13px", color: "var(--text-secondary)", lineHeight: 1.7, marginBottom: "28px" }}>
+              Start with a brain dump to populate tasks, then return in the evening.
+            </p>
+            <Link to="/brain-dump" className="btn-primary">
+              Start Brain Dump
+            </Link>
           </div>
-          <h1 className="text-3xl font-semibold tracking-tight">Nothing to reflect on yet</h1>
-          <p className="mt-3 text-muted-foreground">Start with a brain dump to populate tasks, then return in the evening.</p>
-          <Link
-            to="/brain-dump"
-            className="mt-8 inline-flex items-center gap-2 rounded-xl px-6 py-3 text-sm font-semibold text-primary-foreground shadow-[var(--shadow-glow)]"
-            style={{ background: "var(--gradient-primary)" }}
-          >
-            Start Brain Dump
-          </Link>
         </div>
       </AppShell>
     );
@@ -91,24 +115,14 @@ function ReflectPage() {
     try {
       const completedTasks = state.tasks.filter((t) => t.completed).map((t) => t.title);
       const incompleteTasks = state.tasks.filter((t) => !t.completed).map((t) => t.title);
-
       const res = await getRecap({
-        data: {
-          completedTasks,
-          incompleteTasks,
-          freeText: journal.trim() || undefined,
-        },
+        data: { completedTasks, incompleteTasks, freeText: journal.trim() || undefined },
       });
-
       setRecap(res);
-
-      // Save locally (append to array)
       const cached = window.localStorage.getItem("thinkmate-reflections");
       const reflectionsList = cached ? JSON.parse(cached) : [];
       reflectionsList.unshift(res);
       window.localStorage.setItem("thinkmate-reflections", JSON.stringify(reflectionsList));
-
-      // Save to Database
       db.saveReflection({
         completed_tasks: completedTasks,
         incomplete_tasks: incompleteTasks,
@@ -118,7 +132,6 @@ function ReflectPage() {
         tomorrow_focus: res.tomorrowFocus,
         encouragement: res.encouragement,
       });
-
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to generate reflection recap.");
     } finally {
@@ -133,146 +146,430 @@ function ReflectPage() {
 
   return (
     <AppShell>
-      <div className="mx-auto max-w-3xl px-5 py-12 sm:py-16">
-        <div className="flex items-center justify-between border-b border-border/60 pb-6 mb-8">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl grid place-items-center bg-primary/10 text-primary">
-              <Moon className="w-5 h-5" />
+      <div style={{ background: "var(--bg)", minHeight: "calc(100vh - 56px)", padding: "40px 20px 60px" }}>
+        <div style={{ maxWidth: "680px", margin: "0 auto" }}>
+          {/* Header */}
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "14px",
+              paddingBottom: "24px",
+              borderBottom: "1px solid var(--divider)",
+              marginBottom: "32px",
+            }}
+          >
+            <div
+              style={{
+                width: "40px",
+                height: "40px",
+                borderRadius: "10px",
+                background: "var(--accent-bg)",
+                border: "1px solid var(--accent-border)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              <Moon className="w-5 h-5" style={{ color: "var(--accent-light)" }} />
             </div>
             <div>
-              <h1 className="text-2xl font-bold tracking-tight">Evening Reflection</h1>
-              <p className="text-xs text-muted-foreground mt-0.5 flex items-center gap-1.5 font-medium uppercase tracking-wider">
-                <Calendar className="w-3.5 h-3.5" /> {dateStr}
+              <h1 style={{ fontSize: "22px", fontWeight: 700, color: "var(--text-primary)", letterSpacing: "-0.02em" }}>Evening Reflection</h1>
+              <p
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  fontSize: "9px",
+                  letterSpacing: "0.14em",
+                  color: "var(--text-hint)",
+                  textTransform: "uppercase",
+                  fontWeight: 500,
+                  marginTop: "2px",
+                }}
+              >
+                <Calendar className="w-3 h-3" /> {dateStr}
               </p>
             </div>
           </div>
-        </div>
 
-        {!recap ? (
-          <div className="space-y-8 animate-fade-in">
-            {/* Checklist */}
-            <div className="rounded-2xl border border-border bg-card p-6 shadow-[var(--shadow-soft)]">
-              <h2 className="text-lg font-semibold tracking-tight mb-4">What did you complete today?</h2>
-              <div className="space-y-2.5">
-                {state.tasks.map((t) => (
-                  <button
-                    key={t.id}
-                    onClick={() => toggleTask(t.id)}
-                    className={cn(
-                      "w-full flex items-start gap-3 rounded-xl border border-border bg-background p-4 text-left hover:border-primary/40 transition-colors",
-                      t.completed && "bg-success/5 border-success/30 opacity-80"
-                    )}
-                  >
-                    <span className={t.completed ? "text-success mt-0.5" : "text-muted-foreground mt-0.5"}>
-                      {t.completed ? <CheckCircle2 className="w-4.5 h-4.5" /> : <Circle className="w-4.5 h-4.5" />}
-                    </span>
-                    <span className={cn("text-sm font-medium leading-snug", t.completed && "line-through text-muted-foreground")}>
-                      {t.title}
-                    </span>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Journal Input */}
-            <div className="rounded-2xl border border-border bg-card p-6 shadow-[var(--shadow-soft)]">
-              <h2 className="text-lg font-semibold tracking-tight mb-1">Anything else on your mind?</h2>
-              <p className="text-xs text-muted-foreground mb-4">A stray thought, a win you want to record, or something that's still bothering you…</p>
-              <textarea
-                value={journal}
-                onChange={(e) => setJournal(e.target.value)}
-                placeholder="Today was highly productive, though I spent too much time on logo design revisions. Feeling glad to clear my coding targets..."
-                className="w-full min-h-[140px] rounded-xl border border-border bg-background p-4 text-sm leading-relaxed focus:outline-none focus:ring-1 focus:ring-primary resize-y"
-              />
-            </div>
-
-            {error && (
-              <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
-                {error}
-              </div>
-            )}
-
-            <button
-              onClick={handleGenerateRecap}
-              disabled={loading}
-              className="w-full flex justify-center items-center gap-2 rounded-xl py-3.5 text-sm font-semibold text-primary-foreground disabled:opacity-50 shadow-[var(--shadow-glow)] hover:scale-[1.01] active:scale-[0.99] transition-transform"
-              style={{ background: "var(--gradient-primary)" }}
-            >
-              {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
-              {loading ? "Generating Recap..." : "Generate My Recap"}
-            </button>
-          </div>
-        ) : (
-          <div className="space-y-8 animate-slide-up">
-            {/* Recap Summary */}
-            <div className="rounded-2xl border-l-4 border-l-primary border border-border bg-card p-6 shadow-[var(--shadow-soft)]">
-              <h2 className="text-xs uppercase tracking-[0.18em] text-primary font-semibold">Accomplishment Recap</h2>
-              <p className="mt-3 text-base leading-relaxed text-foreground">
-                {recap.summary}
-              </p>
-            </div>
-
-            {/* Carried Over Incomplete Tasks */}
-            {recap.carriedOver.length > 0 && (
-              <div className="rounded-2xl border border-border bg-card p-6 shadow-[var(--shadow-soft)]">
-                <h2 className="text-lg font-semibold tracking-tight mb-4">Carried Over to Tomorrow</h2>
-                <div className="space-y-3">
-                  {recap.carriedOver.map((task) => (
-                    <div key={task} className="flex items-center justify-between gap-4 border border-border rounded-xl p-3.5 bg-background">
-                      <span className="text-sm font-medium text-muted-foreground">{task}</span>
-                      <button
-                        onClick={() => handlePushToTomorrow(task)}
-                        disabled={pushedTasks[task]}
-                        className={cn(
-                          "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all hover:scale-[1.02]",
-                          pushedTasks[task]
-                            ? "bg-success/10 border-success/30 text-success cursor-default"
-                            : "bg-primary/5 border-primary/20 text-primary hover:bg-primary/10"
+          {!recap ? (
+            <div style={{ display: "flex", flexDirection: "column", gap: "24px" }} className="animate-fade-in">
+              {/* Task checklist */}
+              <div>
+                <h2 style={{ fontSize: "15px", fontWeight: 700, color: "var(--text-primary)", marginBottom: "14px" }}>
+                  What did you complete today?
+                </h2>
+                <div style={{ display: "flex", flexDirection: "column" }}>
+                  {state.tasks.map((t) => (
+                    <button
+                      key={t.id}
+                      onClick={() => toggleTask(t.id)}
+                      style={{
+                        width: "100%",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "12px",
+                        padding: "14px 0",
+                        background: "none",
+                        border: "none",
+                        borderBottom: "1px solid var(--divider)",
+                        cursor: "pointer",
+                        textAlign: "left",
+                        transition: "opacity 0.2s",
+                      }}
+                    >
+                      <span style={{ color: t.completed ? "var(--success)" : "var(--text-hint)", flexShrink: 0 }}>
+                        {t.completed ? (
+                          <CheckCircle2
+                            className="w-5 h-5"
+                            style={{
+                              width: "18px",
+                              height: "18px",
+                              background: "var(--tm-accent)",
+                              borderRadius: "50%",
+                              color: "var(--btn-primary-fg)",
+                            }}
+                          />
+                        ) : (
+                          <Circle
+                            style={{
+                              width: "18px",
+                              height: "18px",
+                              color: "var(--text-hint)",
+                            }}
+                          />
                         )}
+                      </span>
+                      <span
+                        style={{
+                          fontSize: "14px",
+                          fontWeight: 500,
+                          color: t.completed ? "var(--text-muted)" : "var(--text-primary)",
+                          textDecoration: t.completed ? "line-through" : "none",
+                          lineHeight: 1.4,
+                          opacity: t.completed ? 0.6 : 1,
+                        }}
                       >
-                        {pushedTasks[task] ? <Check className="w-3.5 h-3.5" /> : null}
-                        {pushedTasks[task] ? "Pushed!" : "Push to Tomorrow"}
-                      </button>
-                    </div>
+                        {t.title}
+                      </span>
+                    </button>
                   ))}
                 </div>
               </div>
-            )}
 
-            {/* Tomorrow's Focus */}
-            {recap.tomorrowFocus && (
-              <div className="rounded-2xl p-7 text-primary-foreground shadow-[var(--shadow-glow)] relative overflow-hidden" style={{ background: "var(--gradient-primary)" }}>
-                <div className="absolute -right-20 -top-20 w-64 h-64 rounded-full bg-white/10 blur-2xl" />
-                <div className="relative">
-                  <div className="text-xs uppercase tracking-[0.18em] font-medium opacity-80 flex items-center gap-1.5">
-                    <Sparkles className="w-4 h-4" /> Tomorrow's Primary Focus
-                  </div>
-                  <h3 className="mt-4 text-2xl font-bold tracking-tight">
-                    {recap.tomorrowFocus}
-                  </h3>
-                </div>
+              {/* Journal textarea */}
+              <div>
+                <h2 style={{ fontSize: "15px", fontWeight: 700, color: "var(--text-primary)", marginBottom: "6px" }}>
+                  Anything else on your mind?
+                </h2>
+                <p style={{ fontSize: "12px", color: "var(--text-hint)", marginBottom: "12px" }}>
+                  A stray thought, a win you want to record, or something that's still bothering you…
+                </p>
+                <textarea
+                  value={journal}
+                  onChange={(e) => setJournal(e.target.value)}
+                  placeholder="Today was highly productive, though I spent too much time on logo design revisions. Feeling glad to clear my coding targets..."
+                  style={{
+                    width: "100%",
+                    minHeight: "130px",
+                    padding: "16px",
+                    background: "var(--bg-input)",
+                    border: "1px solid var(--border-input)",
+                    borderRadius: "10px",
+                    color: "var(--text-primary)",
+                    fontSize: "13px",
+                    lineHeight: 1.8,
+                    outline: "none",
+                    resize: "vertical",
+                    fontFamily: "inherit",
+                    boxSizing: "border-box",
+                    transition: "border-color 0.2s",
+                  }}
+                  onFocus={(e) => (e.currentTarget.style.borderColor = "var(--border-accent)")}
+                  onBlur={(e) => (e.currentTarget.style.borderColor = "var(--border-input)")}
+                />
               </div>
-            )}
 
-            {/* Encouragement */}
-            {recap.encouragement && (
-              <div className="text-center py-6">
-                <p className="text-base text-primary italic font-medium max-w-lg mx-auto leading-relaxed">
-                  "{recap.encouragement}"
+              {error && (
+                <div style={{ background: "var(--badge-high-bg)", border: "1px solid var(--destructive)", borderRadius: "8px", padding: "12px 16px", fontSize: "13px", color: "var(--badge-high-fg)" }}>
+                  {error}
+                </div>
+              )}
+
+              <button
+                onClick={handleGenerateRecap}
+                disabled={loading}
+                className="btn-primary"
+                style={{ justifyContent: "center", width: "100%", opacity: loading ? 0.6 : 1 }}
+              >
+                {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+                {loading ? "Generating Recap..." : "Generate My Recap"}
+              </button>
+            </div>
+          ) : (
+            /* ── Recap Result ── */
+            <div style={{ display: "flex", flexDirection: "column", gap: "24px" }} className="animate-slide-up">
+              {/* Summary */}
+              <div
+                style={{
+                  background: "var(--bg-card)",
+                  border: "1px solid var(--border-card)",
+                  borderRadius: "12px",
+                  padding: "20px 24px",
+                }}
+              >
+                <p
+                  style={{
+                    fontSize: "9px",
+                    letterSpacing: "0.15em",
+                    color: "var(--text-hint)",
+                    textTransform: "uppercase",
+                    fontWeight: 500,
+                    marginBottom: "12px",
+                  }}
+                >
+                  Accomplishment Recap
+                </p>
+                <p
+                  style={{
+                    fontFamily: "Georgia, serif",
+                    fontSize: "15px",
+                    color: "var(--text-secondary)",
+                    fontStyle: "italic",
+                    lineHeight: 1.7,
+                  }}
+                >
+                  {recap.summary}
                 </p>
               </div>
-            )}
 
-            <div className="flex justify-center pt-4">
-              <Link
-                to="/dashboard"
-                className="inline-flex items-center gap-2 rounded-xl border border-border bg-card px-6 py-3 text-sm font-semibold hover:bg-accent transition-colors"
-              >
-                Go to Dashboard <ArrowRight className="w-4 h-4" />
-              </Link>
+              {/* Carried Over */}
+              {recap.carriedOver.length > 0 && (
+                <div
+                  style={{
+                    background: "var(--bg-card)",
+                    border: "1px solid var(--border-card)",
+                    borderRadius: "12px",
+                    padding: "20px 24px",
+                  }}
+                >
+                  <p
+                    style={{
+                      fontSize: "9px",
+                      letterSpacing: "0.15em",
+                      color: "var(--text-hint)",
+                      textTransform: "uppercase",
+                      fontWeight: 500,
+                      marginBottom: "14px",
+                    }}
+                  >
+                    Carried Over to Tomorrow
+                  </p>
+                  <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                    {recap.carriedOver.map((task) => (
+                      <div
+                        key={task}
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          gap: "16px",
+                          padding: "12px 14px",
+                          background: "var(--bg)",
+                          border: "1px solid var(--divider)",
+                          borderRadius: "8px",
+                        }}
+                      >
+                        <span style={{ fontSize: "13px", color: "var(--text-secondary)", fontWeight: 500 }}>
+                          {task}
+                        </span>
+                        <button
+                          onClick={() => handlePushToTomorrow(task)}
+                          disabled={pushedTasks[task]}
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: "6px",
+                            padding: "6px 14px",
+                            borderRadius: "20px",
+                            fontSize: "12px",
+                            fontWeight: 600,
+                            border: pushedTasks[task]
+                              ? "1px solid var(--success)"
+                              : "1px solid var(--accent-border)",
+                            background: pushedTasks[task]
+                              ? "var(--accent-bg)"
+                              : "transparent",
+                            color: pushedTasks[task] ? "var(--success)" : "var(--text-secondary)",
+                            cursor: pushedTasks[task] ? "default" : "pointer",
+                            transition: "all 0.2s",
+                            flexShrink: 0,
+                          }}
+                          onMouseEnter={(e) => {
+                            if (!pushedTasks[task]) {
+                              (e.currentTarget as HTMLElement).style.background = "var(--accent-bg)";
+                              (e.currentTarget as HTMLElement).style.color = "var(--text-primary)";
+                            }
+                          }}
+                          onMouseLeave={(e) => {
+                            if (!pushedTasks[task]) {
+                              (e.currentTarget as HTMLElement).style.background = "transparent";
+                              (e.currentTarget as HTMLElement).style.color = "var(--text-secondary)";
+                            }
+                          }}
+                        >
+                          {pushedTasks[task] ? <Check className="w-3.5 h-3.5" /> : null}
+                          {pushedTasks[task] ? "Pushed!" : "Push to Tomorrow"}
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Tomorrow's Focus */}
+              {recap.tomorrowFocus && (
+                <div
+                  style={{
+                    background: "var(--bg-card)",
+                    border: "1px solid var(--border-card)",
+                    borderRadius: "12px",
+                    padding: "20px 24px",
+                  }}
+                >
+                  <p
+                    style={{
+                      fontSize: "9px",
+                      letterSpacing: "0.15em",
+                      color: "var(--text-hint)",
+                      textTransform: "uppercase",
+                      fontWeight: 500,
+                      marginBottom: "12px",
+                    }}
+                  >
+                    Tomorrow's Focus
+                  </p>
+                  <p
+                    style={{
+                      borderLeft: "2px solid var(--tm-accent)",
+                      paddingLeft: "12px",
+                      fontSize: "16px",
+                      fontWeight: 700,
+                      color: "var(--text-primary)",
+                      lineHeight: 1.4,
+                    }}
+                  >
+                    {recap.tomorrowFocus}
+                  </p>
+                </div>
+              )}
+
+              {/* Encouragement */}
+              {recap.encouragement && (
+                <div style={{ textAlign: "center", padding: "16px 0" }}>
+                  <p
+                    style={{
+                      fontFamily: "Georgia, serif",
+                      fontSize: "15px",
+                      color: "var(--text-muted)",
+                      fontStyle: "italic",
+                      maxWidth: "480px",
+                      margin: "0 auto",
+                      lineHeight: 1.7,
+                    }}
+                  >
+                    "{recap.encouragement}"
+                  </p>
+                </div>
+              )}
+
+              {/* Morning Commitment Gating Card */}
+              {!commitmentSaved ? (
+                <div
+                  style={{
+                    background: "rgba(124, 58, 237, 0.03)",
+                    border: "1px solid rgba(124, 58, 237, 0.15)",
+                    borderRadius: "12px",
+                    padding: "24px",
+                    textAlign: "center",
+                    boxShadow: "0 4px 20px rgba(0,0,0,0.15)",
+                    marginTop: "8px"
+                  }}
+                  className="animate-slide-up"
+                >
+                  <span style={{ fontSize: "24px" }}>🎯</span>
+                  <h3 style={{ fontSize: "16px", fontWeight: 700, color: "var(--text-primary)", marginTop: "12px", marginBottom: "6px" }}>
+                    Commit to Tomorrow's Morning Focus
+                  </h3>
+                  <p style={{ fontSize: "12px", color: "var(--text-secondary)", marginBottom: "16px", lineHeight: 1.6 }}>
+                    Lock in one specific task you will accomplish first thing tomorrow morning. This commitment will display on your dashboard tomorrow.
+                  </p>
+                  
+                  <input
+                    type="text"
+                    value={commitmentInput}
+                    onChange={(e) => setCommitmentInput(e.target.value)}
+                    placeholder="e.g., Read Unit 3 midterm study notes for 45 minutes"
+                    style={{
+                      width: "100%",
+                      padding: "12px 16px",
+                      background: "var(--bg-input)",
+                      border: "1px solid var(--border-input)",
+                      borderRadius: "8px",
+                      color: "var(--text-primary)",
+                      fontSize: "13px",
+                      outline: "none",
+                      marginBottom: "16px",
+                      boxSizing: "border-box",
+                      textAlign: "center",
+                      transition: "border-color 0.2s"
+                    }}
+                    onFocus={(e) => (e.currentTarget.style.borderColor = "var(--border-accent)")}
+                    onBlur={(e) => (e.currentTarget.style.borderColor = "var(--border-input)")}
+                  />
+
+                  <button
+                    onClick={handleSaveCommitment}
+                    disabled={!commitmentInput.trim()}
+                    className="btn-primary"
+                    style={{
+                      justifyContent: "center",
+                      width: "100%",
+                      opacity: commitmentInput.trim() ? 1 : 0.5
+                    }}
+                  >
+                    Commit & Save Focus
+                  </button>
+                </div>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "16px", paddingTop: "8px" }} className="animate-fade-in">
+                  <div
+                    style={{
+                      background: "rgba(16, 185, 129, 0.08)",
+                      border: "1px solid rgba(16, 185, 129, 0.2)",
+                      borderRadius: "8px",
+                      padding: "12px 24px",
+                      color: "var(--success)",
+                      fontSize: "13px",
+                      fontWeight: 600,
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "8px"
+                    }}
+                  >
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                    Morning focus locked in. See you tomorrow.
+                  </div>
+                  
+                  <Link to="/dashboard" className="btn-secondary" style={{ padding: "10px 24px" }}>
+                    Go to Dashboard <ArrowRight className="w-4 h-4" />
+                  </Link>
+                </div>
+              )}
             </div>
-          </div>
-        )}
+          )}
+        </div>
       </div>
     </AppShell>
   );

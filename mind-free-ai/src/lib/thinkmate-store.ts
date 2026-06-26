@@ -4,7 +4,45 @@ import * as db from "./db";
 
 const KEY = "thinkmate:state:v1";
 
-export type StoredTask = ThinkMateTask & { id: string; completed: boolean; createdAt: number; carried_over_from?: string; session_id?: string | null };
+function levenshtein(s1: string, s2: string): number {
+  const len1 = s1.length, len2 = s2.length;
+  const matrix: number[][] = [];
+  for (let i = 0; i <= len1; i++) matrix[i] = [i];
+  for (let j = 0; j <= len2; j++) matrix[0][j] = j;
+  for (let i = 1; i <= len1; i++) {
+    for (let j = 1; j <= len2; j++) {
+      const cost = s1[i - 1] === s2[j - 1] ? 0 : 1;
+      matrix[i][j] = Math.min(
+        matrix[i - 1][j] + 1,
+        matrix[i][j - 1] + 1,
+        matrix[i - 1][j - 1] + cost
+      );
+    }
+  }
+  return matrix[len1][len2];
+}
+
+function getSimilarity(s1: string, s2: string): number {
+  const l1 = s1.toLowerCase().trim();
+  const l2 = s2.toLowerCase().trim();
+  if (l1 === l2) return 1.0;
+  const maxLength = Math.max(l1.length, l2.length);
+  if (maxLength === 0) return 1.0;
+  const distance = levenshtein(l1, l2);
+  return (maxLength - distance) / maxLength;
+}
+
+export type StoredTask = ThinkMateTask & {
+  id: string;
+  completed: boolean;
+  createdAt: number;
+  carried_over_from?: string;
+  session_id?: string | null;
+  postpone_count?: number;
+  is_procrastination_trigger?: boolean;
+  blocker_question?: string | null;
+  snooze_until?: string | null;
+};
 
 export interface ThinkMateState {
   tasks: StoredTask[];
@@ -14,6 +52,25 @@ export interface ThinkMateState {
   recommendation: string;
   lastBrainDump: string;
   lastUpdated: number | null;
+  streak: {
+    current_streak: number;
+    longest_streak: number;
+    last_active_at: string | null;
+    last_active_date: string | null;
+    total_mit_completed: number;
+  } | null;
+  activeCommitment: {
+    id: string;
+    morning_commitment: string;
+    created_at: string;
+  } | null;
+  moodProfile: {
+    stressLevel: string;
+    emotionalState: string;
+    toneSignals: string[];
+    recommendedMode: string;
+    detectedAt: number;
+  } | null;
 }
 
 const empty: ThinkMateState = {
@@ -24,6 +81,9 @@ const empty: ThinkMateState = {
   recommendation: "",
   lastBrainDump: "",
   lastUpdated: null,
+  streak: null,
+  activeCommitment: null,
+  moodProfile: null,
 };
 
 function read(): ThinkMateState {
@@ -42,12 +102,13 @@ function write(state: ThinkMateState) {
   window.localStorage.setItem(KEY, JSON.stringify(state));
   window.localStorage.setItem("thinkmate-tasks", JSON.stringify(state.tasks));
   
-  const analysis: ThinkMateAnalysis = {
+  const analysis: ThinkMateAnalysis & { moodProfile?: any } = {
     tasks: state.tasks,
     mentalLoadScore: state.mentalLoadScore,
     mentalLoadRisk: state.mentalLoadRisk,
     nextStep: state.nextStep || { task: "", reason: "", estimatedMinutes: 0 },
     recommendation: state.recommendation,
+    moodProfile: state.moodProfile,
   };
   window.localStorage.setItem("thinkmate-analysis", JSON.stringify(analysis));
   
@@ -70,7 +131,7 @@ export function useThinkMate() {
 
   return {
     state,
-    saveAnalysis(brainDump: string, analysis: ThinkMateAnalysis, extras?: { sessionSummary?: string; classificationExplanations?: any[]; conversationHistory?: any[] }) {
+    saveAnalysis(brainDump: string, analysis: ThinkMateAnalysis & { moodProfile?: any }, extras?: { sessionSummary?: string; classificationExplanations?: any[]; conversationHistory?: any[]; moodProfile?: any }) {
       const tasks: StoredTask[] = analysis.tasks.map((t, i) => {
         // Ensure id is a UUID if not already formatted (for Supabase mapping)
         const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test((t as any).id || "");
@@ -83,7 +144,10 @@ export function useThinkMate() {
         };
       });
 
-      const newState = {
+      const moodProfile = extras?.moodProfile || analysis.moodProfile || null;
+
+      const newState: ThinkMateState = {
+        ...read(),
         tasks,
         mentalLoadScore: analysis.mentalLoadScore,
         mentalLoadRisk: analysis.mentalLoadRisk,
@@ -91,6 +155,7 @@ export function useThinkMate() {
         recommendation: analysis.recommendation,
         lastBrainDump: brainDump,
         lastUpdated: Date.now(),
+        moodProfile,
       };
       
       write(newState);
@@ -117,6 +182,63 @@ export function useThinkMate() {
         score: analysis.mentalLoadScore,
         risk_level: analysis.mentalLoadRisk,
       });
+
+      // Procrastination trigger detection (both DB and local simulation fallback)
+      const taskTitles = tasks.map(t => t.title);
+      if (window.localStorage.getItem("thinkmate-demo-mode") === "true") {
+        const s = read();
+        const existingTasks = s.tasks.filter(t => !t.completed);
+        const updatedTasks = tasks.map(t => {
+          let bestMatch: any = null;
+          let maxSim = 0;
+          for (const old of existingTasks) {
+            const sim = getSimilarity(t.title, old.title);
+            if (sim > maxSim) {
+              maxSim = sim;
+              bestMatch = old;
+            }
+          }
+          if (maxSim > 0.75 && bestMatch) {
+            const newCount = (bestMatch.postpone_count || 0) + 1;
+            return {
+              ...t,
+              postpone_count: newCount,
+              is_procrastination_trigger: true,
+              blocker_question: t.blockerQuestion || "What is a small 5-minute action you can take to get started?",
+            };
+          }
+          return t;
+        });
+        write({ ...newState, tasks: updatedTasks });
+      } else {
+        db.detectProcrastinationTriggers(taskTitles).then((triggers) => {
+          if (triggers && triggers.length > 0) {
+            db.getUserTasks().then((updatedTasks) => {
+              if (updatedTasks && updatedTasks.length > 0) {
+                const currentS = read();
+                const mapped = updatedTasks.map((t: any) => ({
+                  id: t.id,
+                  title: t.title,
+                  priority: t.priority,
+                  quadrant: t.quadrant,
+                  completed: t.completed,
+                  createdAt: new Date(t.created_at).getTime(),
+                  estimatedMinutes: t.estimated_minutes || 15,
+                  dependencies: t.dependencies || [],
+                  rationale: t.rationale || "",
+                  carried_over_from: t.carried_over_from || undefined,
+                  session_id: t.session_id,
+                  postpone_count: t.postpone_count || 0,
+                  is_procrastination_trigger: t.is_procrastination_trigger || false,
+                  blocker_question: t.blocker_question || null,
+                  snooze_until: t.snooze_until || null,
+                }));
+                write({ ...currentS, tasks: mapped });
+              }
+            });
+          }
+        });
+      }
 
       // Maintain local history cache (keep last 7)
       if (typeof window !== "undefined") {
@@ -150,9 +272,135 @@ export function useThinkMate() {
 
       if (updatedTask) {
         db.updateTask(id, { completed: updatedTask.completed });
+
+        // If completed task matches nextStep.task, update streak!
+        if (updatedTask.completed && s.nextStep && s.nextStep.task === updatedTask.title) {
+          const completedTimeStr = new Date().toISOString();
+          const completedDateStr = new Date().toLocaleDateString("en-CA"); // YYYY-MM-DD
+          
+          if (window.localStorage.getItem("thinkmate-demo-mode") === "true") {
+            const currentStreak = s.streak ? { ...s.streak } : { current_streak: 0, longest_streak: 0, last_active_at: null, last_active_date: null, total_mit_completed: 0 };
+            
+            const lastActiveAt = currentStreak.last_active_at ? new Date(currentStreak.last_active_at) : null;
+            const lastActiveDateStr = currentStreak.last_active_date;
+            
+            let newCurrent = currentStreak.current_streak;
+            let newLongest = currentStreak.longest_streak;
+            let newTotal = currentStreak.total_mit_completed;
+
+            if (!lastActiveAt || !lastActiveDateStr) {
+              newCurrent = 1;
+              newLongest = 1;
+              newTotal = 1;
+            } else {
+              const lastDate = new Date(`${lastActiveDateStr}T00:00:00`);
+              const compDate = new Date(`${completedDateStr}T00:00:00`);
+              const oneDayMs = 24 * 60 * 60 * 1000;
+              const daysDiff = Math.round((compDate.getTime() - lastDate.getTime()) / oneDayMs);
+
+              if (daysDiff === 0) {
+                // Same day: only update total and active time
+                currentStreak.last_active_at = completedTimeStr;
+                currentStreak.total_mit_completed += 1;
+                write({ ...read(), streak: currentStreak });
+                return;
+              }
+
+              const diffHours = (new Date(completedTimeStr).getTime() - lastActiveAt.getTime()) / (1000 * 60 * 60);
+              const isConsecutive = daysDiff === 1;
+              const withinGrace = diffHours <= 30.0;
+
+              if (isConsecutive || withinGrace) {
+                newCurrent += 1;
+                newTotal += 1;
+                if (newCurrent > newLongest) {
+                  newLongest = newCurrent;
+                }
+              } else {
+                newCurrent = 1;
+                newTotal += 1;
+              }
+            }
+
+            const simulatedStreak = {
+              current_streak: newCurrent,
+              longest_streak: newLongest,
+              last_active_at: completedTimeStr,
+              last_active_date: completedDateStr,
+              total_mit_completed: newTotal,
+            };
+
+            write({ ...read(), streak: simulatedStreak });
+            
+            const milestoneDays = [3, 7, 14, 21, 30, 60, 100];
+            if (milestoneDays.includes(simulatedStreak.current_streak)) {
+              const milestoneKey = "thinkmate-streak-milestones";
+              const raw = window.localStorage.getItem(milestoneKey);
+              const achieved: number[] = raw ? JSON.parse(raw) : [];
+              if (!achieved.includes(simulatedStreak.current_streak)) {
+                achieved.push(simulatedStreak.current_streak);
+                window.localStorage.setItem(milestoneKey, JSON.stringify(achieved));
+                window.dispatchEvent(new CustomEvent("thinkmate:streak-milestone", {
+                  detail: { streak: simulatedStreak.current_streak }
+                }));
+              }
+            }
+          } else {
+            db.updateStreak(completedTimeStr, completedDateStr).then((newStreak) => {
+              if (newStreak) {
+                const currentS = read();
+                write({ ...currentS, streak: newStreak });
+                
+                const milestoneDays = [3, 7, 14, 21, 30, 60, 100];
+                if (milestoneDays.includes(newStreak.current_streak)) {
+                  const milestoneKey = "thinkmate-streak-milestones";
+                  const raw = window.localStorage.getItem(milestoneKey);
+                  const achieved: number[] = raw ? JSON.parse(raw) : [];
+                  if (!achieved.includes(newStreak.current_streak)) {
+                    achieved.push(newStreak.current_streak);
+                    window.localStorage.setItem(milestoneKey, JSON.stringify(achieved));
+                    window.dispatchEvent(new CustomEvent("thinkmate:streak-milestone", {
+                      detail: { streak: newStreak.current_streak }
+                    }));
+                  }
+                }
+              }
+            });
+          }
+        }
       }
     },
 
+    saveCommitment(commitment: string) {
+      const s = read();
+      const newCommitment = {
+        id: typeof crypto !== "undefined" && typeof crypto.randomUUID === "function" ? crypto.randomUUID() : `${Date.now()}`,
+        morning_commitment: commitment,
+        created_at: new Date().toISOString(),
+      };
+      write({ ...s, activeCommitment: newCommitment });
+      db.saveCommitment(commitment).then((res) => {
+        if (res) {
+          const currentS = read();
+          write({ ...currentS, activeCommitment: res });
+        }
+      });
+    },
+
+    fulfillCommitment(commitmentId: string) {
+      const s = read();
+      write({ ...s, activeCommitment: null });
+      db.fulfillCommitment(commitmentId);
+    },
+
+    snoozeTask(id: string, snoozeHours: number) {
+      const s = read();
+      const snoozeUntil = new Date(Date.now() + snoozeHours * 60 * 60 * 1000).toISOString();
+      const nextTasks = s.tasks.map((t) => (t.id === id ? { ...t, snooze_until: snoozeUntil } : t));
+      write({ ...s, tasks: nextTasks });
+      db.updateTask(id, { snooze_until: snoozeUntil });
+    },
+    
     moveTask(id: string, quadrant: ThinkMateTask["quadrant"]) {
       const s = read();
       const nextTasks = s.tasks.map((t) => (t.id === id ? { ...t, quadrant } : t));
@@ -191,6 +439,7 @@ export function useThinkMate() {
         window.localStorage.removeItem("thinkmate-goals");
         window.localStorage.removeItem("thinkmate-load-history");
         window.localStorage.removeItem("thinkmate-session-context");
+        window.localStorage.removeItem("thinkmate-streak-milestones");
       }
     },
   };
@@ -202,10 +451,12 @@ export async function initializeFromDB() {
   if (isDemoMode) return;
 
   try {
-    const [latestSession, tasks, loadHistory] = await Promise.all([
+    const [latestSession, tasks, loadHistory, streak, activeCommitment] = await Promise.all([
       db.getLatestSession(),
       db.getUserTasks(),
-      db.getLoadHistory(30)
+      db.getLoadHistory(30),
+      db.getStreak(),
+      db.getActiveCommitment()
     ]);
 
     // Hydrate tasks
@@ -221,6 +472,10 @@ export async function initializeFromDB() {
       rationale: t.rationale || "",
       carried_over_from: t.carried_over_from || undefined,
       session_id: t.session_id,
+      postpone_count: t.postpone_count || 0,
+      is_procrastination_trigger: t.is_procrastination_trigger || false,
+      blocker_question: t.blocker_question || null,
+      snooze_until: t.snooze_until || null,
     }));
     window.localStorage.setItem("thinkmate-tasks", JSON.stringify(mappedTasks));
 
@@ -230,6 +485,7 @@ export async function initializeFromDB() {
     let nextStep = null;
     let recommendation = "";
     let lastBrainDump = "";
+    let moodProfile = null;
 
     if (latestSession) {
       const analysis = latestSession.analysis;
@@ -238,6 +494,7 @@ export async function initializeFromDB() {
       nextStep = analysis?.nextStep ?? null;
       recommendation = latestSession.analysis?.recommendation || "";
       lastBrainDump = latestSession.brain_dump_text || "";
+      moodProfile = analysis?.moodProfile || null;
       
       window.localStorage.setItem("thinkmate-analysis", JSON.stringify(analysis));
       window.localStorage.setItem("thinkmate-session-context", JSON.stringify({
@@ -256,6 +513,9 @@ export async function initializeFromDB() {
       recommendation,
       lastBrainDump,
       lastUpdated: latestSession ? new Date(latestSession.created_at).getTime() : Date.now(),
+      streak: streak || null,
+      activeCommitment: activeCommitment || null,
+      moodProfile: moodProfile || null,
     };
     window.localStorage.setItem(KEY, JSON.stringify(consolidatedState));
 

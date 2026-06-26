@@ -1,11 +1,14 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { AppShell } from "@/components/AppShell";
-import { conductBrainDumpSession } from "@/lib/thinkmate.functions";
+import { conductBrainDumpSession, type ThinkMateAnalysis } from "@/lib/thinkmate.functions";
 import { useThinkMate } from "@/lib/thinkmate-store";
-import { Loader2, Sparkles, Wand2, ArrowRight } from "lucide-react";
+import { Loader2, Sparkles, ArrowRight, Mic, MicOff, Square } from "lucide-react";
 import { AuthGuard } from "@/components/AuthGuard";
+import { useIsMobile } from "@/hooks/use-mobile";
+import { cn } from "@/lib/utils";
+import { toast } from "sonner";
 
 export const Route = createFileRoute("/brain-dump")({
   head: () => ({
@@ -34,42 +37,191 @@ type QuestionState = {
   quickOptions?: string[];
 };
 
+interface SpeechRecognitionErrorEvent extends Event {
+  error: string;
+  message?: string;
+}
+
+interface SpeechRecognitionEvent extends Event {
+  resultIndex: number;
+  results: SpeechRecognitionResultList;
+}
+
+function useVoiceDump(onTranscript: (text: string) => void) {
+  const [isListening, setIsListening] = useState(false);
+  const [isSupported, setIsSupported] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [interimTranscript, setInterimTranscript] = useState("");
+  const [recordingSeconds, setRecordingSeconds] = useState(0);
+  const recognitionRef = useRef<any>(null);
+  const timerRef = useRef<any>(null);
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+      if (SpeechRecognition) {
+        setIsSupported(true);
+        const recognition = new SpeechRecognition();
+        recognition.continuous = true;
+        recognition.interimResults = true;
+        recognition.lang = "en-US";
+
+        recognition.onresult = (event: SpeechRecognitionEvent) => {
+          let final = "";
+          let interim = "";
+          for (let i = event.resultIndex; i < event.results.length; ++i) {
+            if (event.results[i].isFinal) {
+              final += event.results[i][0].transcript;
+            } else {
+              interim += event.results[i][0].transcript;
+            }
+          }
+          if (final) {
+            onTranscript(final);
+          }
+          setInterimTranscript(interim);
+        };
+
+        recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
+          console.error("Speech recognition error:", event.error);
+          if (event.error === "not-allowed") {
+            setError("Microphone access needed for voice input. You can still type your thoughts below.");
+          } else {
+            // Auto-stop, preserve captured text
+            setError(`Recognition stopped: ${event.error}`);
+          }
+          setIsListening(false);
+        };
+
+        recognition.onend = () => {
+          setIsListening(false);
+          setInterimTranscript("");
+        };
+
+        recognitionRef.current = recognition;
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    if (isListening) {
+      setRecordingSeconds(0);
+      timerRef.current = setInterval(() => {
+        setRecordingSeconds((prev) => prev + 1);
+      }, 1000);
+    } else {
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+        timerRef.current = null;
+      }
+    }
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
+  }, [isListening]);
+
+  const startListening = () => {
+    if (!recognitionRef.current) return;
+    setError(null);
+    setInterimTranscript("");
+    try {
+      recognitionRef.current.start();
+      setIsListening(true);
+      if (typeof navigator !== "undefined" && navigator.vibrate) {
+        navigator.vibrate([100]);
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const stopListening = () => {
+    if (!recognitionRef.current) return;
+    try {
+      recognitionRef.current.stop();
+      setIsListening(false);
+      if (typeof navigator !== "undefined" && navigator.vibrate) {
+        navigator.vibrate([100]);
+      }
+      toast.success("Voice captured — review and analyze when ready");
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const formatDuration = (secs: number) => {
+    const mins = Math.floor(secs / 60);
+    const remaining = secs % 60;
+    return `${mins}:${remaining < 10 ? "0" : ""}${remaining}`;
+  };
+
+  return {
+    isListening,
+    isSupported,
+    startListening,
+    stopListening,
+    error,
+    interimTranscript,
+    setInterimTranscript,
+    recordingSeconds,
+    formatDuration,
+  };
+}
+
 function BrainDumpPage() {
   const navigate = useNavigate();
   const conductSession = useServerFn(conductBrainDumpSession);
   const { saveAnalysis } = useThinkMate();
+  const isMobile = useIsMobile();
 
   const [phase, setPhase] = useState<"input" | "wizard">("input");
   const [text, setText] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Wizard States
+  const {
+    isListening,
+    isSupported: isVoiceSupported,
+    startListening,
+    stopListening,
+    error: voiceError,
+    interimTranscript,
+    recordingSeconds,
+    formatDuration,
+  } = useVoiceDump((newTranscript) => {
+    setText((prev) => {
+      const trimmed = prev.trim();
+      return trimmed ? `${trimmed} ${newTranscript}` : newTranscript;
+    });
+  });
+
   const [history, setHistory] = useState<Array<{ question: string; answer: string }>>([]);
   const [currentQuestion, setCurrentQuestion] = useState<QuestionState | null>(null);
   const [qInput, setQInput] = useState("");
   const [animateCard, setAnimateCard] = useState(false);
+  const [selectedOption, setSelectedOption] = useState<string | null>(null);
 
-  // Check demo mode on mount
   useEffect(() => {
     if (typeof window !== "undefined") {
       const isDemo = window.localStorage.getItem("thinkmate-demo-mode") === "true";
       if (isDemo) {
-        // Pre-fill prompt
-        const demoText = "I have a project submission due this Friday, Java exam on Monday, hackathon this Sunday, need to apply for 3 internships before month end, call my team for project update, haven't started studying Unit 3, also need to pay hostel fee by tomorrow, and I got two internship offers I can't decide between — Offer A pays more but Offer B has better learning.";
+        const demoText =
+          "I have a project submission due this Friday, Java exam on Monday, hackathon this Sunday, need to apply for 3 internships before month end, call my team for project update, haven't started studying Unit 3, also need to pay hostel fee by tomorrow, and I got two internship offers I can't decide between — Offer A pays more but Offer B has better learning.";
         setText(demoText);
-        // We will trigger auto analysis in useEffect to make it seamless
         setLoading(true);
         conductSession({
-          data: {
-            brainDump: demoText,
-            conversationHistory: [],
-            action: "finalize",
-          },
+          data: { brainDump: demoText, conversationHistory: [], action: "finalize" },
         })
           .then((res) => {
             if (res.type === "result") {
-              saveAnalysis(demoText, res, {
+              const analysis: ThinkMateAnalysis = {
+                tasks: res.tasks,
+                mentalLoadScore: res.mentalLoadScore,
+                mentalLoadRisk: res.riskLevel,
+                nextStep: res.recommendedNextStep,
+                recommendation: res.sessionSummary,
+              };
+              saveAnalysis(demoText, analysis, {
                 sessionSummary: res.sessionSummary,
                 classificationExplanations: res.classificationExplanations,
                 conversationHistory: [],
@@ -91,13 +243,8 @@ function BrainDumpPage() {
     setError(null);
     try {
       const res = await conductSession({
-        data: {
-          brainDump: text.trim(),
-          conversationHistory: [],
-          action: "next_question",
-        },
+        data: { brainDump: text.trim(), conversationHistory: [], action: "next_question" },
       });
-
       if (res.type === "question") {
         setCurrentQuestion({
           questionNumber: res.questionNumber,
@@ -108,8 +255,14 @@ function BrainDumpPage() {
         setPhase("wizard");
         setAnimateCard(true);
       } else {
-        // Got a result directly
-        saveAnalysis(text.trim(), res, {
+        const analysis: ThinkMateAnalysis = {
+          tasks: res.tasks,
+          mentalLoadScore: res.mentalLoadScore,
+          mentalLoadRisk: res.riskLevel,
+          nextStep: res.recommendedNextStep,
+          recommendation: res.sessionSummary,
+        };
+        saveAnalysis(text.trim(), analysis, {
           sessionSummary: res.sessionSummary,
           classificationExplanations: res.classificationExplanations,
           conversationHistory: [],
@@ -128,20 +281,14 @@ function BrainDumpPage() {
     setLoading(true);
     setError(null);
     setAnimateCard(false);
-
+    setSelectedOption(null);
     const updatedHistory = [...history, { question: currentQuestion.question, answer: answerText.trim() }];
     setHistory(updatedHistory);
     setQInput("");
-
     try {
       const res = await conductSession({
-        data: {
-          brainDump: text.trim(),
-          conversationHistory: updatedHistory,
-          action: "next_question",
-        },
+        data: { brainDump: text.trim(), conversationHistory: updatedHistory, action: "next_question" },
       });
-
       if (res.type === "question") {
         setCurrentQuestion({
           questionNumber: res.questionNumber,
@@ -151,7 +298,14 @@ function BrainDumpPage() {
         });
         setTimeout(() => setAnimateCard(true), 50);
       } else {
-        saveAnalysis(text.trim(), res, {
+        const analysis: ThinkMateAnalysis = {
+          tasks: res.tasks,
+          mentalLoadScore: res.mentalLoadScore,
+          mentalLoadRisk: res.riskLevel,
+          nextStep: res.recommendedNextStep,
+          recommendation: res.sessionSummary,
+        };
+        saveAnalysis(text.trim(), analysis, {
           sessionSummary: res.sessionSummary,
           classificationExplanations: res.classificationExplanations,
           conversationHistory: updatedHistory,
@@ -170,15 +324,17 @@ function BrainDumpPage() {
     setError(null);
     try {
       const res = await conductSession({
-        data: {
-          brainDump: text.trim(),
-          conversationHistory: history,
-          action: "finalize",
-        },
+        data: { brainDump: text.trim(), conversationHistory: history, action: "finalize" },
       });
-
       if (res.type === "result") {
-        saveAnalysis(text.trim(), res, {
+        const analysis: ThinkMateAnalysis = {
+          tasks: res.tasks,
+          mentalLoadScore: res.mentalLoadScore,
+          mentalLoadRisk: res.riskLevel,
+          nextStep: res.recommendedNextStep,
+          recommendation: res.sessionSummary,
+        };
+        saveAnalysis(text.trim(), analysis, {
           sessionSummary: res.sessionSummary,
           classificationExplanations: res.classificationExplanations,
           conversationHistory: history,
@@ -196,161 +352,514 @@ function BrainDumpPage() {
 
   return (
     <AppShell>
-      <div className="mx-auto max-w-3xl px-5 py-12 sm:py-16">
-        {phase === "input" ? (
-          <div>
-            <div className="text-center">
-              <span className="inline-flex items-center gap-2 rounded-full bg-primary/10 px-3 py-1 text-xs font-medium text-primary">
-                <Sparkles className="w-3.5 h-3.5" /> Step 1 of ~5
-              </span>
-              <h1 className="mt-5 text-4xl sm:text-5xl font-semibold tracking-tight">What's on your mind?</h1>
-              <p className="mt-3 text-muted-foreground">
-                Tasks, worries, deadlines, decisions — type it raw. No structure required.
-              </p>
-            </div>
-
-            <div className="mt-10 rounded-2xl border border-border bg-card shadow-[var(--shadow-soft)] overflow-hidden">
-              <textarea
-                value={text}
-                onChange={(e) => setText(e.target.value)}
-                disabled={loading}
-                placeholder="I have three deadlines this week, my apartment lease ends next month, I keep meaning to call my dad, and I'm trying to decide whether to take that promotion..."
-                className="w-full min-h-[260px] p-6 bg-transparent text-base leading-relaxed text-foreground placeholder:text-muted-foreground/70 focus:outline-none resize-y font-sans"
-              />
-              <div className="flex items-center justify-between gap-3 border-t border-border px-4 py-3 bg-muted/30">
-                <span className="font-mono text-xs text-muted-foreground tabular-nums">
-                  {text.length} / 8000
-                </span>
-                <button
-                  onClick={handleStartDump}
-                  disabled={loading || text.trim().length < 3}
-                  className="inline-flex items-center gap-2 rounded-lg px-5 py-2.5 text-sm font-semibold text-primary-foreground disabled:opacity-50 disabled:cursor-not-allowed shadow-[var(--shadow-glow)] hover:scale-[1.02] active:scale-[0.99] transition-transform"
-                  style={{ background: "var(--gradient-primary)" }}
+      <div style={{ background: "var(--bg)", minHeight: "calc(100vh - 56px)", padding: "48px 20px 64px" }}>
+        <div style={{ maxWidth: "680px", margin: "0 auto" }}>
+          {phase === "input" ? (
+            <div>
+              {/* Header */}
+              <div style={{ textAlign: "center", marginBottom: "36px" }}>
+                <span
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "6px",
+                    background: "var(--accent-bg)",
+                    border: "1px solid var(--accent-border)",
+                    borderRadius: "20px",
+                    padding: "5px 14px",
+                    fontSize: "11px",
+                    color: "var(--accent-light)",
+                    fontWeight: 500,
+                    marginBottom: "20px",
+                  }}
                 >
-                  {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <ArrowRight className="w-4 h-4" />}
-                  {loading ? "Thinking..." : "Start Thinking →"}
-                </button>
-              </div>
-            </div>
-
-            {error && (
-              <div className="mt-4 rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
-                {error}
-              </div>
-            )}
-
-            <div className="mt-10">
-              <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground font-medium mb-3">Or try a sample</p>
-              <div className="grid sm:grid-cols-3 gap-3">
-                {SAMPLES.map((s, i) => (
-                  <button
-                    key={i}
-                    onClick={() => setText(s)}
-                    disabled={loading}
-                    className="text-left rounded-xl border border-border bg-card p-4 text-sm text-muted-foreground hover:border-primary/40 hover:text-foreground hover:bg-accent/40 transition-colors disabled:opacity-50"
-                  >
-                    <span className="font-mono text-[10px] text-primary">SAMPLE 0{i + 1}</span>
-                    <p className="mt-1.5 line-clamp-4 leading-relaxed">{s}</p>
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-        ) : (
-          <div className="space-y-6">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-semibold uppercase tracking-wider text-primary">
-                Step {history.length + 2} of ~5
-              </span>
-              <span className="text-xs text-muted-foreground font-medium">
-                {history.length * 20}% completed
-              </span>
-            </div>
-
-            <div className="h-2 w-full bg-muted rounded-full overflow-hidden">
-              <div
-                className="h-full bg-primary transition-all duration-300"
-                style={{ width: `${history.length * 20}%` }}
-              />
-            </div>
-
-            {loading ? (
-              <div className="rounded-2xl border border-border bg-card p-12 text-center shadow-[var(--shadow-soft)] min-h-[300px] flex flex-col justify-center items-center">
-                <Loader2 className="w-10 h-10 animate-spin text-primary" />
-                <p className="mt-4 text-sm text-muted-foreground animate-pulse">
-                  ThinkMate is thinking...
+                  <Sparkles className="w-3.5 h-3.5" /> Step 1 of ~5
+                </span>
+                <h1
+                  style={{
+                    fontSize: "40px",
+                    fontWeight: 700,
+                    color: "var(--text-primary)",
+                    letterSpacing: "-0.03em",
+                    lineHeight: 1.1,
+                    marginBottom: "12px",
+                  }}
+                >
+                  What's on your mind?
+                </h1>
+                <p style={{ fontSize: "14px", color: "var(--text-secondary)", lineHeight: 1.7 }}>
+                  Tasks, worries, deadlines, decisions — type it raw. No structure required.
                 </p>
               </div>
-            ) : (
-              currentQuestion && (
-                <div
-                  className={`rounded-2xl border border-border bg-card p-8 shadow-[var(--shadow-soft)] min-h-[300px] flex flex-col justify-between transition-all duration-300 ease-out transform ${
-                    animateCard ? "opacity-100 translate-y-0" : "opacity-0 translate-y-4"
-                  }`}
-                >
-                  <div className="space-y-6">
-                    <h2 className="text-2xl sm:text-3xl font-semibold tracking-tight text-primary leading-tight">
-                      {currentQuestion.question}
-                    </h2>
-                    
-                    {currentQuestion.quickOptions && currentQuestion.quickOptions.length > 0 ? (
-                      <div className="flex flex-wrap gap-2.5 pt-4">
-                        {currentQuestion.quickOptions.map((opt) => (
-                          <button
-                            key={opt}
-                            onClick={() => handleNextQuestion(opt)}
-                            className="px-5 py-2.5 rounded-full border border-border bg-background text-sm font-semibold text-foreground hover:border-primary/50 hover:bg-primary/5 hover:scale-[1.02] active:scale-[0.98] transition-all"
-                          >
-                            {opt}
-                          </button>
-                        ))}
-                      </div>
-                    ) : (
-                      <div className="space-y-2.5 pt-4">
-                        <input
-                          type="text"
-                          value={qInput}
-                          onChange={(e) => setQInput(e.target.value)}
-                          onKeyDown={(e) => e.key === "Enter" && handleNextQuestion(qInput)}
-                          placeholder="Type your response..."
-                          className="w-full rounded-xl border border-border bg-background px-4 py-3 text-base focus:outline-none focus:ring-1 focus:ring-primary"
-                        />
-                        <p className="text-xs text-muted-foreground italic pl-1">
-                          {currentQuestion.hint}
-                        </p>
-                      </div>
-                    )}
-                  </div>
 
-                  <div className="flex items-center justify-between gap-4 pt-8 border-t border-border mt-8">
-                    <button
-                      onClick={handleSkipToFinalize}
-                      className="text-xs text-muted-foreground hover:text-foreground font-semibold underline"
-                    >
-                      Skip to instant analysis
-                    </button>
-                    {!currentQuestion.quickOptions && (
+              {/* Textarea card */}
+              <div
+                className={cn(isListening && "animate-pulse")}
+                style={{
+                  background: "var(--bg-input)",
+                  border: isListening ? "1px solid var(--destructive)" : "1px solid var(--border-input)",
+                  boxShadow: isListening ? "0 0 0 3px rgba(239, 68, 68, 0.15)" : "none",
+                  borderRadius: "12px",
+                  overflow: "hidden",
+                  marginBottom: "16px",
+                  transition: "all 0.2s",
+                }}
+              >
+                <textarea
+                  value={text}
+                  onChange={(e) => setText(e.target.value)}
+                  disabled={loading || isListening}
+                  placeholder={
+                    isListening
+                      ? "Listening to your thoughts... click Stop to finish recording."
+                      : "I have three deadlines this week, my apartment lease ends next month, I keep meaning to call my dad, and I'm trying to decide whether to take that promotion..."
+                  }
+                  style={{
+                    width: "100%",
+                    minHeight: "260px",
+                    padding: "24px",
+                    background: "transparent",
+                    color: "var(--text-primary)",
+                    fontSize: "15px",
+                    lineHeight: 1.8,
+                    border: "none",
+                    outline: "none",
+                    resize: "vertical",
+                    fontFamily: "inherit",
+                    boxSizing: "border-box",
+                  }}
+                  // @ts-ignore
+                  onFocus={(e) => {
+                    if (!isListening) {
+                      e.currentTarget.parentElement!.style.borderColor = "var(--border-accent)";
+                    }
+                  }}
+                  onBlur={(e) => {
+                    if (!isListening) {
+                      e.currentTarget.parentElement!.style.borderColor = "var(--border-input)";
+                    }
+                  }}
+                />
+                
+                {interimTranscript && (
+                  <div
+                    style={{
+                      padding: "0 24px 16px",
+                      fontSize: "14px",
+                      color: "var(--text-muted)",
+                      fontStyle: "italic",
+                    }}
+                  >
+                    {interimTranscript}...
+                  </div>
+                )}
+
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    padding: "12px 24px",
+                    borderTop: "1px solid var(--divider)",
+                    background: "var(--bg-card)",
+                  }}
+                >
+                  <span style={{ fontSize: "12px", color: "var(--text-hint)", fontFamily: "monospace" }}>
+                    {text.length} / 8000
+                  </span>
+                  
+                  <div style={{ display: "flex", alignItems: "center" }}>
+                    {isVoiceSupported && !isMobile && (
                       <button
-                        onClick={() => handleNextQuestion(qInput)}
-                        disabled={!qInput.trim()}
-                        className="inline-flex items-center gap-1.5 rounded-lg px-5 py-2 text-sm font-semibold text-primary-foreground disabled:opacity-50"
-                        style={{ background: "var(--gradient-primary)" }}
+                        type="button"
+                        onClick={isListening ? stopListening : startListening}
+                        disabled={loading}
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: "6px",
+                          borderRadius: "20px",
+                          fontSize: "12px",
+                          fontWeight: 600,
+                          padding: "6px 14px",
+                          border: isListening ? "1px solid var(--destructive)" : "1px solid var(--btn-ghost-border)",
+                          background: isListening ? "var(--badge-high-bg)" : "transparent",
+                          color: isListening ? "var(--badge-high-fg)" : "var(--btn-ghost-fg)",
+                          cursor: "pointer",
+                          transition: "all 0.2s",
+                          marginRight: "12px",
+                        }}
+                        onMouseEnter={(e) => {
+                          if (!isListening) {
+                            e.currentTarget.style.color = "var(--btn-ghost-fg-hover)";
+                          }
+                        }}
+                        onMouseLeave={(e) => {
+                          if (!isListening) {
+                            e.currentTarget.style.color = "var(--btn-ghost-fg)";
+                          }
+                        }}
                       >
-                        Next <ArrowRight className="w-4 h-4" />
+                        {isListening ? (
+                          <>
+                            <Square className="w-3.5 h-3.5" /> Stop — {formatDuration(recordingSeconds)}
+                          </>
+                        ) : (
+                          <>
+                            <Mic className="w-3.5 h-3.5" /> Speak
+                          </>
+                        )}
                       </button>
                     )}
+
+                    <button
+                      onClick={handleStartDump}
+                      disabled={loading || text.trim().length < 3 || isListening}
+                      className="btn-primary"
+                      style={{ fontSize: "13px", padding: "9px 20px", opacity: (loading || text.trim().length < 3 || isListening) ? 0.5 : 1 }}
+                    >
+                      {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <ArrowRight className="w-4 h-4" />}
+                      {loading ? "Thinking..." : "Analyze My Thoughts"}
+                    </button>
                   </div>
                 </div>
-              )
-            )}
-
-            {error && (
-              <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
-                {error}
               </div>
-            )}
-          </div>
-        )}
+
+              {isVoiceSupported && isMobile && (
+                <div style={{ display: "flex", justifyContent: "center", margin: "20px 0" }}>
+                  <button
+                    type="button"
+                    onClick={isListening ? stopListening : startListening}
+                    disabled={loading}
+                    style={{
+                      width: "60px",
+                      height: "60px",
+                      borderRadius: "50%",
+                      display: "flex",
+                      flexDirection: "column",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      border: isListening ? "1px solid var(--destructive)" : "1px solid var(--accent-border)",
+                      background: isListening ? "var(--badge-high-bg)" : "var(--accent-bg)",
+                      color: isListening ? "var(--destructive)" : "var(--accent-light)",
+                      boxShadow: "0 4px 12px rgba(0,0,0,0.1)",
+                      cursor: "pointer",
+                      transition: "all 0.2s",
+                    }}
+                  >
+                    {isListening ? (
+                      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "2px" }}>
+                        <Square className="w-4 h-4 text-red-500 animate-pulse" />
+                        <span style={{ fontSize: "9px", fontWeight: 700 }}>{formatDuration(recordingSeconds)}</span>
+                      </div>
+                    ) : (
+                      <Mic className="w-5 h-5" />
+                    )}
+                  </button>
+                </div>
+              )}
+
+              {voiceError && (
+                <div
+                  style={{
+                    background: "var(--badge-high-bg)",
+                    border: "1px solid var(--destructive)",
+                    borderRadius: "8px",
+                    padding: "12px 16px",
+                    fontSize: "13px",
+                    color: "var(--badge-high-fg)",
+                    marginBottom: "16px",
+                  }}
+                >
+                  {voiceError}
+                </div>
+              )}
+
+              {error && (
+                <div
+                  style={{
+                    background: "var(--badge-high-bg)",
+                    border: "1px solid var(--destructive)",
+                    borderRadius: "8px",
+                    padding: "12px 16px",
+                    fontSize: "13px",
+                    color: "var(--badge-high-fg)",
+                    marginBottom: "16px",
+                  }}
+                >
+                  {error}
+                </div>
+              )}
+
+              {/* Sample prompts */}
+              <div style={{ marginTop: "32px" }}>
+                <p
+                  style={{
+                    fontSize: "9px",
+                    letterSpacing: "0.15em",
+                    color: "var(--text-hint)",
+                    textTransform: "uppercase",
+                    fontWeight: 500,
+                    marginBottom: "12px",
+                  }}
+                >
+                  Or try a sample
+                </p>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: "12px" }}>
+                  {SAMPLES.map((s, i) => (
+                    <button
+                      key={i}
+                      onClick={() => setText(s)}
+                      disabled={loading}
+                      style={{
+                        textAlign: "left",
+                        background: "var(--bg-card)",
+                        border: "1px solid var(--border-card)",
+                        borderRadius: "10px",
+                        padding: "14px",
+                        cursor: "pointer",
+                        transition: "border-color 0.2s, background 0.2s",
+                        opacity: loading ? 0.5 : 1,
+                      }}
+                      onMouseEnter={(e) => {
+                        (e.currentTarget as HTMLElement).style.borderColor = "var(--border-accent)";
+                        (e.currentTarget as HTMLElement).style.background = "var(--accent-bg)";
+                      }}
+                      onMouseLeave={(e) => {
+                        (e.currentTarget as HTMLElement).style.borderColor = "var(--border-card)";
+                        (e.currentTarget as HTMLElement).style.background = "var(--bg-card)";
+                      }}
+                    >
+                      <span style={{ fontFamily: "monospace", fontSize: "9px", color: "var(--accent-light)", display: "block", marginBottom: "6px" }}>
+                        SAMPLE 0{i + 1}
+                      </span>
+                      <p
+                        style={{
+                          fontSize: "11px",
+                          color: "var(--text-secondary)",
+                          lineHeight: 1.5,
+                          display: "-webkit-box",
+                          WebkitLineClamp: 4,
+                          WebkitBoxOrient: "vertical",
+                          overflow: "hidden",
+                        }}
+                      >
+                        {s}
+                      </p>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          ) : (
+            /* ── WIZARD PHASE ── */
+            <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
+              {/* Progress */}
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <span
+                  style={{
+                    fontSize: "9px",
+                    letterSpacing: "0.15em",
+                    color: "var(--accent-light)",
+                    textTransform: "uppercase",
+                    fontWeight: 500,
+                  }}
+                >
+                  Step {history.length + 2} of ~5
+                </span>
+                <div style={{ display: "flex", gap: "6px" }}>
+                  {[0, 1, 2, 3].map((i) => (
+                    <span
+                      key={i}
+                      style={{
+                        width: "6px",
+                        height: "6px",
+                        borderRadius: "50%",
+                        background: i <= history.length ? "var(--tm-accent)" : "var(--border-input)",
+                        transition: "background 0.3s",
+                      }}
+                    />
+                  ))}
+                </div>
+              </div>
+
+              {/* Progress bar */}
+              <div style={{ height: "2px", background: "var(--border-card)", borderRadius: "2px", overflow: "hidden" }}>
+                <div
+                  style={{
+                    height: "100%",
+                    background: "var(--tm-accent)",
+                    width: `${history.length * 25}%`,
+                    transition: "width 0.4s ease",
+                  }}
+                />
+              </div>
+
+              {loading ? (
+                <div
+                  style={{
+                    background: "var(--bg-card)",
+                    border: "1px solid var(--border-card)",
+                    borderRadius: "12px",
+                    padding: "64px",
+                    textAlign: "center",
+                    minHeight: "300px",
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: "16px",
+                  }}
+                >
+                  <Loader2 className="w-10 h-10 animate-spin" style={{ color: "var(--tm-accent)" }} />
+                  <p style={{ fontSize: "13px", color: "var(--text-secondary)" }}>
+                    ThinkMate is thinking...
+                  </p>
+                </div>
+              ) : (
+                currentQuestion && (
+                  <div
+                    className={animateCard ? "animate-slide-up" : ""}
+                    style={{
+                      background: "var(--bg-card)",
+                      border: "1px solid var(--border-card)",
+                      borderRadius: "12px",
+                      padding: "32px",
+                      minHeight: "300px",
+                      display: "flex",
+                      flexDirection: "column",
+                      justifyContent: "space-between",
+                    }}
+                  >
+                    <div>
+                      <h2
+                        style={{
+                          fontSize: "22px",
+                          fontWeight: 700,
+                          color: "var(--text-primary)",
+                          lineHeight: 1.3,
+                          marginBottom: "24px",
+                        }}
+                      >
+                        {currentQuestion.question}
+                      </h2>
+
+                      {currentQuestion.quickOptions && currentQuestion.quickOptions.length > 0 ? (
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: "10px" }}>
+                          {currentQuestion.quickOptions.map((opt) => (
+                            <button
+                              key={opt}
+                              onClick={() => {
+                                setSelectedOption(opt);
+                                handleNextQuestion(opt);
+                              }}
+                              className="option-pill"
+                              style={
+                                selectedOption === opt
+                                  ? {
+                                      border: "1px solid var(--tm-accent)",
+                                      background: "var(--accent-bg)",
+                                      color: "var(--accent-light)",
+                                      borderRadius: "20px",
+                                      padding: "8px 18px",
+                                      fontSize: "13px",
+                                      cursor: "pointer",
+                                    }
+                                  : {}
+                              }
+                            >
+                              {opt}
+                            </button>
+                          ))}
+                        </div>
+                      ) : (
+                        <div>
+                          <input
+                            type="text"
+                            value={qInput}
+                            onChange={(e) => setQInput(e.target.value)}
+                            onKeyDown={(e) => e.key === "Enter" && handleNextQuestion(qInput)}
+                            placeholder="Type your response..."
+                            style={{
+                              width: "100%",
+                              padding: "12px 16px",
+                              background: "var(--bg-input)",
+                              border: "1px solid var(--border-input)",
+                              borderRadius: "10px",
+                              color: "var(--text-primary)",
+                              fontSize: "14px",
+                              outline: "none",
+                              fontFamily: "inherit",
+                              boxSizing: "border-box",
+                            }}
+                            onFocus={(e) => (e.currentTarget.style.borderColor = "var(--border-accent)")}
+                            onBlur={(e) => (e.currentTarget.style.borderColor = "var(--border-input)")}
+                          />
+                          <p style={{ fontSize: "11px", color: "var(--text-hint)", fontStyle: "italic", marginTop: "8px" }}>
+                            {currentQuestion.hint}
+                          </p>
+                        </div>
+                      )}
+                    </div>
+
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        gap: "16px",
+                        paddingTop: "24px",
+                        borderTop: "1px solid var(--divider)",
+                        marginTop: "24px",
+                      }}
+                    >
+                      <button
+                        onClick={handleSkipToFinalize}
+                        style={{
+                          fontSize: "11px",
+                          color: "var(--text-hint)",
+                          background: "none",
+                          border: "none",
+                          cursor: "pointer",
+                          textDecoration: "none",
+                        }}
+                        onMouseEnter={(e) => (e.currentTarget.style.color = "var(--text-secondary)")}
+                        onMouseLeave={(e) => (e.currentTarget.style.color = "var(--text-hint)")}
+                      >
+                        Skip to instant analysis
+                      </button>
+                      {!currentQuestion.quickOptions && (
+                        <button
+                          onClick={() => handleNextQuestion(qInput)}
+                          disabled={!qInput.trim()}
+                          className="btn-primary"
+                          style={{ opacity: !qInput.trim() ? 0.4 : 1, fontSize: "13px", padding: "9px 20px" }}
+                        >
+                          Next <ArrowRight className="w-4 h-4" />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )
+              )}
+
+              {error && (
+                <div
+                  style={{
+                    background: "var(--badge-high-bg)",
+                    border: "1px solid var(--destructive)",
+                    borderRadius: "8px",
+                    padding: "12px 16px",
+                    fontSize: "13px",
+                    color: "var(--badge-high-fg)",
+                  }}
+                >
+                  {error}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
       </div>
     </AppShell>
   );

@@ -143,6 +143,48 @@ const getDecisionsFn = createServerFn({ method: "POST" })
     return getDecisionsServer(data.token);
   });
 
+const getStreakFn = createServerFn({ method: "POST" })
+  .validator(z.object({ token: z.string() }))
+  .handler(async ({ data }) => {
+    const { getStreakServer } = await import("./db.server");
+    return getStreakServer(data.token);
+  });
+
+const updateStreakFn = createServerFn({ method: "POST" })
+  .validator(z.object({ token: z.string(), completedTimeStr: z.string(), completedDateStr: z.string() }))
+  .handler(async ({ data }) => {
+    const { updateStreakServer } = await import("./db.server");
+    return updateStreakServer(data.token, data.completedTimeStr, data.completedDateStr);
+  });
+
+const saveCommitmentFn = createServerFn({ method: "POST" })
+  .validator(z.object({ token: z.string(), commitment: z.string() }))
+  .handler(async ({ data }) => {
+    const { saveCommitmentServer } = await import("./db.server");
+    return saveCommitmentServer(data.token, data.commitment);
+  });
+
+const getActiveCommitmentFn = createServerFn({ method: "POST" })
+  .validator(z.object({ token: z.string() }))
+  .handler(async ({ data }) => {
+    const { getActiveCommitmentServer } = await import("./db.server");
+    return getActiveCommitmentServer(data.token);
+  });
+
+const fulfillCommitmentFn = createServerFn({ method: "POST" })
+  .validator(z.object({ token: z.string(), commitmentId: z.string() }))
+  .handler(async ({ data }) => {
+    const { fulfillCommitmentServer } = await import("./db.server");
+    await fulfillCommitmentServer(data.token, data.commitmentId);
+  });
+
+const detectProcrastinationTriggersFn = createServerFn({ method: "POST" })
+  .validator(z.object({ token: z.string(), newTaskTitles: z.array(z.string()) }))
+  .handler(async ({ data }) => {
+    const { detectProcrastinationTriggersServer } = await import("./db.server");
+    return detectProcrastinationTriggersServer(data.token, data.newTaskTitles);
+  });
+
 // Auth Client API wrapper exports
 export async function localSignUp(email: string, password_plain: string, displayName: string) {
   return signUpFn({ data: { email, password: password_plain, displayName } });
@@ -326,6 +368,77 @@ export async function getDecisions(): Promise<any[]> {
     return await getDecisionsFn({ data: { token } });
   } catch (err) {
     console.error("Error getting decisions from local DB:", err);
+    return [];
+  }
+}
+
+export async function getStreak(): Promise<any | null> {
+  if (isDemo()) return null;
+  try {
+    const token = getSessionToken();
+    if (!token) return null;
+    return await getStreakFn({ data: { token } });
+  } catch (err) {
+    console.error("Error getting streak:", err);
+    return null;
+  }
+}
+
+export async function updateStreak(completedTimeStr: string, completedDateStr: string): Promise<any | null> {
+  if (isDemo()) return null;
+  try {
+    const token = getSessionToken();
+    if (!token) return null;
+    return await updateStreakFn({ data: { token, completedTimeStr, completedDateStr } });
+  } catch (err) {
+    console.error("Error updating streak:", err);
+    return null;
+  }
+}
+
+export async function saveCommitment(commitment: string): Promise<any | null> {
+  if (isDemo()) return null;
+  try {
+    const token = getSessionToken();
+    if (!token) return null;
+    return await saveCommitmentFn({ data: { token, commitment } });
+  } catch (err) {
+    console.error("Error saving commitment:", err);
+    return null;
+  }
+}
+
+export async function getActiveCommitment(): Promise<any | null> {
+  if (isDemo()) return null;
+  try {
+    const token = getSessionToken();
+    if (!token) return null;
+    return await getActiveCommitmentFn({ data: { token } });
+  } catch (err) {
+    console.error("Error getting active commitment:", err);
+    return null;
+  }
+}
+
+export async function fulfillCommitment(commitmentId: string): Promise<void> {
+  if (isDemo()) return;
+  try {
+    const token = getSessionToken();
+    if (!token) return;
+    await fulfillCommitmentFn({ data: { token, commitmentId } });
+  } catch (err) {
+    console.error("Error fulfilling commitment:", err);
+  }
+}
+
+export async function detectProcrastinationTriggers(newTaskTitles: string[]): Promise<any[]> {
+  if (isDemo()) return [];
+  try {
+    const token = getSessionToken();
+    if (!token) return [];
+    return await detectProcrastinationTriggersFn({ data: { token, newTaskTitles } });
+  } catch (err) {
+    console.error("Error detecting procrastination triggers:", err);
     return [];
   }
 }

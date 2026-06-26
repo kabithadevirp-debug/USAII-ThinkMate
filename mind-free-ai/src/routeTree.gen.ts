@@ -10,6 +10,7 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as SignupRouteImport } from './routes/signup'
+import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as ReflectRouteImport } from './routes/reflect'
 import { Route as MatrixRouteImport } from './routes/matrix'
 import { Route as LoginRouteImport } from './routes/login'
@@ -22,6 +23,11 @@ import { Route as IndexRouteImport } from './routes/index'
 const SignupRoute = SignupRouteImport.update({
   id: '/signup',
   path: '/signup',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SettingsRoute = SettingsRouteImport.update({
+  id: '/settings',
+  path: '/settings',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ReflectRoute = ReflectRouteImport.update({
@@ -74,6 +80,7 @@ export interface FileRoutesByFullPath {
   '/login': typeof LoginRoute
   '/matrix': typeof MatrixRoute
   '/reflect': typeof ReflectRoute
+  '/settings': typeof SettingsRoute
   '/signup': typeof SignupRoute
 }
 export interface FileRoutesByTo {
@@ -85,6 +92,7 @@ export interface FileRoutesByTo {
   '/login': typeof LoginRoute
   '/matrix': typeof MatrixRoute
   '/reflect': typeof ReflectRoute
+  '/settings': typeof SettingsRoute
   '/signup': typeof SignupRoute
 }
 export interface FileRoutesById {
@@ -97,6 +105,7 @@ export interface FileRoutesById {
   '/login': typeof LoginRoute
   '/matrix': typeof MatrixRoute
   '/reflect': typeof ReflectRoute
+  '/settings': typeof SettingsRoute
   '/signup': typeof SignupRoute
 }
 export interface FileRouteTypes {
@@ -110,6 +119,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/matrix'
     | '/reflect'
+    | '/settings'
     | '/signup'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -121,6 +131,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/matrix'
     | '/reflect'
+    | '/settings'
     | '/signup'
   id:
     | '__root__'
@@ -132,6 +143,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/matrix'
     | '/reflect'
+    | '/settings'
     | '/signup'
   fileRoutesById: FileRoutesById
 }
@@ -144,6 +156,7 @@ export interface RootRouteChildren {
   LoginRoute: typeof LoginRoute
   MatrixRoute: typeof MatrixRoute
   ReflectRoute: typeof ReflectRoute
+  SettingsRoute: typeof SettingsRoute
   SignupRoute: typeof SignupRoute
 }
 
@@ -154,6 +167,13 @@ declare module '@tanstack/react-router' {
       path: '/signup'
       fullPath: '/signup'
       preLoaderRoute: typeof SignupRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/settings': {
+      id: '/settings'
+      path: '/settings'
+      fullPath: '/settings'
+      preLoaderRoute: typeof SettingsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/reflect': {
@@ -224,6 +244,7 @@ const rootRouteChildren: RootRouteChildren = {
   LoginRoute: LoginRoute,
   MatrixRoute: MatrixRoute,
   ReflectRoute: ReflectRoute,
+  SettingsRoute: SettingsRoute,
   SignupRoute: SignupRoute,
 }
 export const routeTree = rootRouteImport

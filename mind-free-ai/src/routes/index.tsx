@@ -1,6 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { AppShell } from "@/components/AppShell";
-import { ArrowRight, Brain, Compass, Gauge, Sparkles, Target, ListChecks } from "lucide-react";
+import { Brain, Grid3x3, Scale, Sparkles } from "lucide-react";
+import { useThinkMate } from "@/lib/thinkmate-store";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -22,120 +23,509 @@ export const Route = createFileRoute("/")({
 });
 
 function Landing() {
+  const { state } = useThinkMate();
+
+  const mentalLoadScore = state.mentalLoadScore ?? 42;
+  const mentalLoadRisk = state.mentalLoadRisk ?? "moderate";
+  const nextStep = state.nextStep ?? { task: "Review project scope", estimatedMinutes: 25 };
+
+  const riskLabel =
+    mentalLoadRisk === "high" ? "High Risk ↑"
+    : mentalLoadRisk === "moderate" ? "Moderate →"
+    : "Manageable ✓";
+
+  const riskColor =
+    mentalLoadRisk === "high" ? "var(--badge-high-fg)"
+    : mentalLoadRisk === "moderate" ? "var(--badge-med-fg)"
+    : "var(--success)";
+
   return (
     <AppShell>
-      {/* Hero */}
-      <section className="relative overflow-hidden">
-        <div className="absolute inset-0 -z-10" style={{ background: "var(--gradient-hero)" }} />
-        <div className="absolute -top-32 left-1/2 -translate-x-1/2 w-[800px] h-[800px] rounded-full -z-10 opacity-30 blur-3xl"
-             style={{ background: "radial-gradient(circle, var(--color-primary), transparent 60%)" }} />
+      {/* ══════════════════════ HERO — 3-column ══════════════════════ */}
+      <section
+        style={{
+          background: "var(--bg)",
+          padding: "80px 0 0",
+          position: "relative",
+          overflow: "hidden",
+          transition: "var(--transition)",
+        }}
+      >
+        {/* Ambient glow */}
+        <div
+          style={{
+            position: "absolute",
+            top: 0,
+            left: "50%",
+            transform: "translateX(-50%)",
+            width: "600px",
+            height: "300px",
+            background: "radial-gradient(ellipse at 50% 0%, var(--orb-glow-1) 0%, transparent 70%)",
+            pointerEvents: "none",
+          }}
+        />
 
-        <div className="mx-auto max-w-5xl px-5 pt-20 pb-24 text-center">
-          <span className="inline-flex items-center gap-2 rounded-full border border-primary/20 bg-primary/5 px-3.5 py-1.5 text-xs font-medium text-primary">
-            <Sparkles className="w-3.5 h-3.5" /> USAII Global Hackathon · Productivity
-          </span>
-
-          <h1 className="mt-7 text-5xl sm:text-6xl md:text-7xl font-semibold tracking-[-0.03em] text-foreground">
-            Think less about <em className="not-italic text-primary">what to do.</em>
-            <br />
-            Do more of <span className="italic">what matters.</span>
-          </h1>
-
-          <p className="mt-6 mx-auto max-w-2xl text-lg text-muted-foreground leading-relaxed">
-            ThinkMate AI is your personal thinking partner. Dump everything on your mind — tasks, worries, deadlines, decisions.
-            We organise it, score your mental load, and surface the <strong className="text-foreground font-semibold">one next step</strong> worth doing.
-          </p>
-
-          <div className="mt-9 flex flex-wrap items-center justify-center gap-3">
-            <Link
-              to="/brain-dump"
-              onClick={() => {
-                localStorage.removeItem("thinkmate-demo-mode");
+        <div
+          className="mx-auto max-w-6xl px-5"
+          style={{
+            display: "grid",
+            gridTemplateColumns: "1fr 260px 1fr",
+            gap: "40px",
+            alignItems: "center",
+            minHeight: "420px",
+          }}
+        >
+          {/* ── LEFT: Text ── */}
+          <div style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
+            {/* Badge */}
+            <span
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "8px",
+                border: "1px solid var(--border-card)",
+                borderRadius: "20px",
+                padding: "5px 12px",
+                width: "fit-content",
               }}
-              className="inline-flex items-center gap-2 rounded-xl px-6 py-3.5 text-sm font-semibold text-primary-foreground shadow-[var(--shadow-glow)] hover:scale-[1.02] active:scale-[0.99] transition-transform"
-              style={{ background: "var(--gradient-primary)" }}
             >
-              Start Brain Dump <ArrowRight className="w-4 h-4" />
-            </Link>
-            <Link
-              to="/brain-dump"
-              onClick={() => {
-                localStorage.setItem("thinkmate-demo-mode", "true");
+              <span
+                className="animate-pulse-dot"
+                style={{
+                  width: "5px",
+                  height: "5px",
+                  borderRadius: "50%",
+                  background: "var(--tm-accent)",
+                  flexShrink: 0,
+                }}
+              />
+              <span
+                style={{
+                  fontSize: "10px",
+                  letterSpacing: "0.14em",
+                  color: "var(--text-muted)",
+                  textTransform: "uppercase",
+                  fontWeight: 500,
+                }}
+              >
+                USAII GLOBAL HACKATHON · PRODUCTIVITY
+              </span>
+            </span>
+
+            {/* H1 */}
+            <h1
+              className="hero-h1"
+              style={{
+                fontSize: "46px",
+                fontWeight: 700,
+                letterSpacing: "-0.03em",
+                lineHeight: 1.05,
+                color: "var(--text-primary)",
+                margin: 0,
               }}
-              className="inline-flex items-center gap-2 rounded-xl border border-primary text-primary px-6 py-3.5 text-sm font-semibold hover:bg-primary/5 transition-colors"
             >
-              See a Live Demo
-            </Link>
-            <Link
-              to="/dashboard"
-              className="inline-flex items-center gap-2 rounded-xl border border-border bg-card px-6 py-3.5 text-sm font-semibold text-foreground hover:bg-accent transition-colors"
+              Think less about{" "}
+              <em
+                style={{
+                  fontStyle: "normal",
+                  color: "var(--text-secondary)",
+                }}
+              >
+                what to do.
+              </em>
+            </h1>
+
+            {/* Subtext */}
+            <p
+              style={{
+                fontSize: "13px",
+                color: "var(--text-muted)",
+                maxWidth: "280px",
+                lineHeight: 1.7,
+                margin: 0,
+              }}
             >
-              View Dashboard
-            </Link>
+              Dump everything on your mind. ThinkMate organises it, scores your
+              load, and surfaces the{" "}
+              <strong style={{ color: "var(--text-secondary)" }}>
+                one next step
+              </strong>{" "}
+              worth doing.
+            </p>
+
+            {/* CTA Row */}
+            <div style={{ display: "flex", gap: "12px", flexWrap: "wrap" }}>
+              <Link
+                to="/brain-dump"
+                onClick={() => localStorage.removeItem("thinkmate-demo-mode")}
+                className="btn-primary"
+              >
+                Start brain dump
+              </Link>
+              <Link
+                to="/brain-dump"
+                onClick={() => localStorage.setItem("thinkmate-demo-mode", "true")}
+                className="btn-secondary"
+              >
+                See a live demo
+              </Link>
+            </div>
           </div>
 
-          <p className="mt-5 text-xs text-muted-foreground">No signup. Your thoughts stay on your device.</p>
-        </div>
-      </section>
+          {/* ── CENTER: The Orb ── */}
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              gap: "16px",
+              position: "relative",
+            }}
+          >
+            <div
+              style={{
+                position: "relative",
+                width: "215px",
+                height: "215px",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              {/* Outer ring 1 */}
+              <div
+                className="animate-breathe-outer"
+                style={{
+                  position: "absolute",
+                  width: "215px",
+                  height: "215px",
+                  borderRadius: "50%",
+                  border: "1px solid var(--orb-ring-3)",
+                }}
+              />
+              {/* Outer ring 2 */}
+              <div
+                className="animate-breathe-slow"
+                style={{
+                  position: "absolute",
+                  width: "190px",
+                  height: "190px",
+                  borderRadius: "50%",
+                  border: "1px solid var(--orb-ring-2)",
+                }}
+              />
+              {/* Inner ring */}
+              <div
+                className="animate-breathe"
+                style={{
+                  position: "absolute",
+                  width: "160px",
+                  height: "160px",
+                  borderRadius: "50%",
+                  border: "1px solid var(--orb-ring-1)",
+                }}
+              />
+              {/* Glow bg */}
+              <div
+                className="animate-breathe orb-glow"
+                style={{
+                  position: "absolute",
+                  width: "180px",
+                  height: "180px",
+                  borderRadius: "50%",
+                  background:
+                    "radial-gradient(circle, var(--orb-glow-1) 0%, var(--orb-glow-2) 50%, transparent 75%)",
+                  transform: "scale(1.15)",
+                }}
+              />
+              {/* Core */}
+              <div
+                className="animate-core-pulse orb-core"
+                style={{
+                  position: "relative",
+                  width: "80px",
+                  height: "80px",
+                  borderRadius: "50%",
+                  background:
+                    "radial-gradient(circle at 38% 38%, #a78bfa, #7c3aed 60%, #4c1d95)",
+                  zIndex: 1,
+                }}
+              />
 
-      {/* Feature grid */}
-      <section className="mx-auto max-w-6xl px-5 pb-24">
-        <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {features.map((f) => (
-            <div key={f.title} className="group rounded-2xl border border-border bg-card p-6 shadow-[var(--shadow-soft)] hover:border-primary/30 transition-colors">
-              <div className="w-11 h-11 rounded-xl grid place-items-center bg-primary/10 text-primary mb-4 group-hover:bg-primary group-hover:text-primary-foreground transition-colors">
-                <f.icon className="w-5 h-5" />
+              {/* Floating Card 1 — bottom-left */}
+              <div
+                className="float-card floating-card animate-float"
+                style={{
+                  position: "absolute",
+                  bottom: "10px",
+                  left: "-30px",
+                  zIndex: 10,
+                  minWidth: "110px",
+                }}
+              >
+                <div className="label-upper" style={{ marginBottom: "4px" }}>
+                  MENTAL LOAD
+                </div>
+                <div
+                  style={{
+                    fontSize: "18px",
+                    fontWeight: 700,
+                    color: "var(--text-primary)",
+                    lineHeight: 1,
+                  }}
+                >
+                  {mentalLoadScore}
+                </div>
+                <div style={{ fontSize: "10px", color: riskColor, marginTop: "2px" }}>
+                  {riskLabel}
+                </div>
               </div>
-              <h3 className="text-base font-semibold tracking-tight">{f.title}</h3>
-              <p className="mt-1.5 text-sm text-muted-foreground leading-relaxed">{f.desc}</p>
+
+              {/* Floating Card 2 — top-right */}
+              <div
+                className="float-card floating-card animate-float-2"
+                style={{
+                  position: "absolute",
+                  top: "10px",
+                  right: "-40px",
+                  zIndex: 10,
+                  minWidth: "140px",
+                }}
+              >
+                <div className="label-upper" style={{ marginBottom: "4px" }}>
+                  SMART NEXT STEP
+                </div>
+                <div
+                  style={{
+                    fontSize: "12px",
+                    fontWeight: 700,
+                    color: "var(--text-primary)",
+                    lineHeight: 1.3,
+                  }}
+                >
+                  {nextStep.task}
+                </div>
+                <div style={{ fontSize: "10px", color: "var(--accent-light)", marginTop: "2px" }}>
+                  Do now · ~{nextStep.estimatedMinutes} min
+                </div>
+              </div>
+            </div>
+
+            {/* Orb label */}
+            <span
+              style={{
+                fontSize: "10px",
+                letterSpacing: "0.15em",
+                color: "var(--text-muted)",
+                textTransform: "uppercase",
+              }}
+            >
+              COGNITIVE OVERLOAD INDEX
+            </span>
+          </div>
+
+          {/* ── RIGHT: Label stack ── */}
+          <div style={{ display: "flex", flexDirection: "column" }}>
+            {[
+              { text: "FOR CLEARING YOUR MIND", active: true },
+              { text: "TO PRIORITISE WHAT MATTERS", active: false },
+              { text: "DECIDED BY AI · APPROVED BY YOU", active: false },
+              { text: "BUILT IN 24 HOURS", active: false },
+            ].map((item, i) => (
+              <div
+                key={i}
+                className={item.active ? "feature-line active" : "feature-line"}
+                style={{
+                  padding: "14px 0",
+                  borderBottom: "1px solid var(--divider)",
+                  fontSize: "10px",
+                  letterSpacing: "0.14em",
+                  textTransform: "uppercase",
+                  color: item.active ? "var(--text-secondary)" : "var(--text-muted)",
+                  fontWeight: 500,
+                  cursor: "default",
+                  transition: "color 0.2s",
+                }}
+              >
+                {item.text}
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* ══ METRICS ROW ══ */}
+        <div
+          className="mx-auto max-w-6xl"
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(3, 1fr)",
+            borderTop: "1px solid var(--divider)",
+            borderBottom: "1px solid var(--divider)",
+            marginTop: "64px",
+          }}
+        >
+          {[
+            { value: "5+", label: "AI-POWERED VIEWS" },
+            { value: "2–4s", label: "FROM DUMP TO CLARITY" },
+            { value: "100%", label: "YOUR DECISION, ALWAYS" },
+          ].map((m, i) => (
+            <div
+              key={i}
+              style={{
+                padding: "28px 40px",
+                borderRight: i < 2 ? "1px solid var(--divider)" : "none",
+              }}
+            >
+              <div
+                style={{
+                  fontSize: "30px",
+                  fontWeight: 700,
+                  color: "var(--text-primary)",
+                  letterSpacing: "-0.03em",
+                  lineHeight: 1,
+                }}
+              >
+                {m.value}
+              </div>
+              <div
+                style={{
+                  fontSize: "10px",
+                  letterSpacing: "0.1em",
+                  color: "var(--text-muted)",
+                  textTransform: "uppercase",
+                  marginTop: "6px",
+                }}
+              >
+                {m.label}
+              </div>
             </div>
           ))}
         </div>
       </section>
 
-      {/* How it works */}
-      <section className="mx-auto max-w-5xl px-5 pb-28">
-        <div className="text-center mb-12">
-          <h2 className="text-3xl sm:text-4xl font-semibold tracking-tight">Five stages. One clear next step.</h2>
-        </div>
-        <ol className="grid sm:grid-cols-5 gap-3">
-          {steps.map((s, i) => (
-            <li key={s.title} className="rounded-xl border border-border bg-card p-5">
-              <div className="font-mono text-xs text-primary">0{i + 1}</div>
-              <div className="mt-2 font-semibold text-sm">{s.title}</div>
-              <div className="mt-1 text-xs text-muted-foreground leading-relaxed">{s.desc}</div>
-            </li>
+      {/* ══════════════════════ FEATURES STRIP ══════════════════════ */}
+      <section
+        style={{
+          background: "var(--bg)",
+          borderTop: "1px solid var(--divider)",
+          transition: "var(--transition)",
+        }}
+      >
+        <div
+          className="mx-auto max-w-6xl"
+          style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)" }}
+        >
+          {featureItems.map((f, i) => (
+            <div
+              key={f.name}
+              style={{
+                padding: "24px 24px 24px 40px",
+                borderRight: i < 3 ? "1px solid var(--divider)" : "none",
+                cursor: "default",
+                transition: "background 0.2s",
+              }}
+              onMouseEnter={(e) =>
+                ((e.currentTarget as HTMLElement).style.background = "var(--bg-card-hover)")
+              }
+              onMouseLeave={(e) =>
+                ((e.currentTarget as HTMLElement).style.background = "transparent")
+              }
+            >
+              <div style={{ fontSize: "18px", color: "var(--accent-light)", marginBottom: "10px" }}>
+                <f.icon className="w-5 h-5" />
+              </div>
+              <div
+                style={{
+                  fontSize: "12px",
+                  fontWeight: 700,
+                  color: "var(--text-secondary)",
+                  marginBottom: "6px",
+                }}
+              >
+                {f.name}
+              </div>
+              <div
+                style={{
+                  fontSize: "11px",
+                  color: "var(--text-muted)",
+                  lineHeight: 1.5,
+                }}
+              >
+                {f.desc}
+              </div>
+            </div>
           ))}
-        </ol>
-
-        <div className="mt-14 rounded-2xl p-8 sm:p-10 text-center" style={{ background: "var(--gradient-primary)" }}>
-          <p className="font-mono text-xs uppercase tracking-[0.2em] text-primary-foreground/70">Try it now</p>
-          <h3 className="mt-3 text-2xl sm:text-3xl font-semibold text-primary-foreground">Your mind is full. Let's empty it.</h3>
-          <Link
-            to="/brain-dump"
-            className="mt-6 inline-flex items-center gap-2 rounded-xl bg-background text-foreground px-6 py-3 text-sm font-semibold hover:opacity-95"
-          >
-            Open Brain Dump <ArrowRight className="w-4 h-4" />
-          </Link>
         </div>
       </section>
+
+      {/* ══════════════════════ TICKER BAR ══════════════════════ */}
+      <div
+        style={{
+          background: "var(--bg)",
+          borderTop: "1px solid var(--divider)",
+          padding: "14px 0",
+          overflowX: "auto",
+          transition: "var(--transition)",
+        }}
+      >
+        <div
+          className="mx-auto max-w-6xl px-5"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "8px",
+            whiteSpace: "nowrap",
+            fontSize: "10px",
+            letterSpacing: "0.1em",
+            color: "var(--text-hint)",
+            textTransform: "uppercase",
+          }}
+        >
+          {[
+            "BRAIN DUMP",
+            "AI EXTRACTION",
+            "EISENHOWER SORT",
+            "COI SCORE",
+            "SMART NEXT STEP",
+            "REFLECT & CARRY FORWARD",
+            "NO SIGNUP REQUIRED",
+          ].map((step, i, arr) => (
+            <span
+              key={step}
+              className="ticker-item"
+              style={{ display: "flex", alignItems: "center", gap: "8px" }}
+            >
+              {step}
+              {i < arr.length - 1 && (
+                 <span style={{ color: "var(--tm-accent)" }}>→</span>
+              )}
+            </span>
+          ))}
+        </div>
+      </div>
     </AppShell>
   );
 }
 
-const features = [
-  { icon: Brain, title: "Brain Dump", desc: "Type everything on your mind in any format. No templates. No friction." },
-  { icon: ListChecks, title: "AI Task Extraction", desc: "Auto-classified across Eisenhower quadrants with deadlines and dependencies." },
-  { icon: Target, title: "Smart Next Step", desc: "One recommended action with reasoning and time estimate. No 50-item lists." },
-  { icon: Gauge, title: "Mental Load Score", desc: "Real-time 0–100 cognitive load. We flag burnout before it happens." },
-  { icon: Compass, title: "Decision Framework", desc: "Weighted comparisons for the choices that actually matter." },
-  { icon: Sparkles, title: "Daily Reflection", desc: "End-of-day recap that carries over what's left into tomorrow." },
-];
-
-const steps = [
-  { title: "Brain Dump", desc: "Everything on your mind, raw." },
-  { title: "AI Analysis", desc: "Extract, classify, score." },
-  { title: "Dashboard", desc: "Top 3 + load score." },
-  { title: "Smart Action", desc: "Your single next step." },
-  { title: "Reflect", desc: "Recalibrate for tomorrow." },
+const featureItems = [
+  {
+    icon: Brain,
+    name: "Brain Dump",
+    desc: "Type everything raw — tasks, worries, deadlines, decisions. No templates.",
+  },
+  {
+    icon: Grid3x3,
+    name: "Eisenhower Matrix",
+    desc: "AI-classified tasks sorted by urgency × importance. Drag to override.",
+  },
+  {
+    icon: Scale,
+    name: "Decision Framework",
+    desc: "Weighted comparisons for choices that actually matter. Final call is yours.",
+  },
+  {
+    icon: Sparkles,
+    name: "Evening Reflect",
+    desc: "End-of-day recap that carries unfinished work into tomorrow's plan.",
+  },
 ];

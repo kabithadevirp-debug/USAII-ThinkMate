@@ -37,10 +37,9 @@ type SessionContext = {
 };
 
 function Dashboard() {
-  const { state, toggleTask } = useThinkMate();
+  const { state, toggleTask, saveCommitment, fulfillCommitment, snoozeTask } = useThinkMate();
   const hasData = state.lastUpdated !== null;
 
-  // Rationale section expand state
   const [explainExpanded, setExplainExpanded] = useState(() => {
     if (typeof window !== "undefined") {
       return window.localStorage.getItem("thinkmate-explain-expanded") === "true";
@@ -48,12 +47,25 @@ function Dashboard() {
     return false;
   });
 
-  // Load history local state
   const [loadHistory, setLoadHistory] = useState<LoadHistoryItem[]>([]);
-  // Session context local state
   const [sessionContext, setSessionContext] = useState<SessionContext | null>(null);
 
-  // Read load history and context on mount
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (detail && detail.streak) {
+        import("sonner").then(({ toast }) => {
+          toast.success(`🎉 Milestone Reached: ${detail.streak}-Day Streak!`, {
+            description: "Incredible momentum. You're building a life-changing daily habit.",
+            duration: 6000,
+          });
+        });
+      }
+    };
+    window.addEventListener("thinkmate:streak-milestone", handler);
+    return () => window.removeEventListener("thinkmate:streak-milestone", handler);
+  }, []);
+
   useEffect(() => {
     if (typeof window !== "undefined") {
       try {
@@ -78,7 +90,6 @@ function Dashboard() {
     });
   };
 
-  // 1. Carried over tasks logic
   const carriedOverTasks = useMemo(() => {
     const today = new Date().toDateString();
     return state.tasks.filter((t) => {
@@ -87,33 +98,16 @@ function Dashboard() {
     });
   }, [state.tasks]);
 
-  // 2. Sparkline setup (last 7 entries)
   const sparklineData = useMemo(() => {
     if (loadHistory.length === 0) return [];
-    
-    // Sort chronological: oldest to newest
-    const sorted = [...loadHistory]
-      .slice(0, 7)
-      .reverse();
-
+    const sorted = [...loadHistory].slice(0, 7).reverse();
     const result = [];
     const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-    
-    // Total slots to fill
     const totalSlots = 7;
     const placeholderCount = totalSlots - sorted.length;
-
-    // Fill placeholder slots
     for (let i = 0; i < placeholderCount; i++) {
-      result.push({
-        dayLabel: "-",
-        score: 10,
-        isPlaceholder: true,
-        dateStr: "No data",
-      });
+      result.push({ dayLabel: "-", score: 10, isPlaceholder: true, dateStr: "No data" });
     }
-
-    // Fill real entries
     sorted.forEach((item) => {
       const d = new Date(item.date);
       result.push({
@@ -123,292 +117,772 @@ function Dashboard() {
         dateStr: d.toLocaleDateString(),
       });
     });
-
     return result;
   }, [loadHistory]);
 
-  // 3. Rule-based commentary line
   const commentaryText = useMemo(() => {
     if (loadHistory.length < 1) return "";
-    if (loadHistory.length < 3) {
-      return "Keep using ThinkMate daily to see your load trend here.";
-    }
-    
-    const last3 = loadHistory.slice(0, 3).map(h => h.score);
-    const allHigh = last3.every(s => s > 70);
-    const allLow = last3.every(s => s < 40);
-
-    if (allHigh) {
-      return "Your load has been high 3 days running. Consider dropping or delegating something today.";
-    }
-    if (allLow) {
-      return "You've had a light few days. Good time to tackle something you've been avoiding.";
-    }
+    if (loadHistory.length < 3) return "Keep using ThinkMate daily to see your load trend here.";
+    const last3 = loadHistory.slice(0, 3).map((h) => h.score);
+    const allHigh = last3.every((s) => s > 70);
+    const allLow = last3.every((s) => s < 40);
+    if (allHigh) return "Your load has been high 3 days running. Consider dropping or delegating something today.";
+    if (allLow) return "You've had a light few days. Good time to tackle something you've been avoiding.";
     return "Your load is fluctuating. Try to keep one consistent priority each morning.";
   }, [loadHistory]);
+  const activeTasks = useMemo(() => {
+    return state.tasks.filter((t) => {
+      if (t.completed) return false;
+      if (t.snooze_until && new Date(t.snooze_until).getTime() > Date.now()) return false;
+      return true;
+    });
+  }, [state.tasks]);
 
+  const top3 = useMemo(() => {
+    return [...activeTasks]
+      .sort((a, b) => {
+        const order = { do_now: 0, schedule: 1, delegate: 2, ignore: 3 } as const;
+        if (order[a.quadrant] !== order[b.quadrant]) return order[a.quadrant] - order[b.quadrant];
+        const p = { high: 0, medium: 1, low: 2 } as const;
+        return p[a.priority] - p[b.priority];
+      })
+      .slice(0, 3);
+  }, [activeTasks]);
+
+  // ── EMPTY STATE ──
   if (!hasData) {
     return (
       <AppShell>
-        <div className="mx-auto max-w-xl px-5 py-24 text-center">
-          <div className="mx-auto w-16 h-16 rounded-2xl grid place-items-center bg-primary/10 text-primary mb-6">
-            <Sparkles className="w-7 h-7" />
+        <div style={{ minHeight: "calc(100vh - 56px)", background: "var(--bg)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <div style={{ textAlign: "center", maxWidth: "400px", padding: "0 20px" }}>
+            <div
+              style={{
+                width: "64px",
+                height: "64px",
+                borderRadius: "16px",
+                background: "var(--accent-bg)",
+                border: "1px solid var(--accent-border)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                margin: "0 auto 24px",
+              }}
+            >
+              <Sparkles className="w-7 h-7" style={{ color: "var(--accent-light)" }} />
+            </div>
+            <h1 style={{ fontSize: "28px", fontWeight: 700, color: "var(--text-primary)", letterSpacing: "-0.03em", marginBottom: "12px" }}>
+              Your dashboard is empty
+            </h1>
+            <p style={{ fontSize: "13px", color: "var(--text-secondary)", lineHeight: 1.7, marginBottom: "32px" }}>
+              Do a brain dump and ThinkMate AI will fill this in with your priorities, load score, and next step.
+            </p>
+            <Link to="/brain-dump" className="btn-primary">
+              <PenLine className="w-4 h-4" /> Start Brain Dump
+            </Link>
           </div>
-          <h1 className="text-3xl font-semibold tracking-tight">Your dashboard is empty</h1>
-          <p className="mt-3 text-muted-foreground">Do a brain dump and ThinkMate AI will fill this in with your priorities, load score, and next step.</p>
-          <Link
-            to="/brain-dump"
-            className="mt-8 inline-flex items-center gap-2 rounded-xl px-6 py-3 text-sm font-semibold text-primary-foreground shadow-[var(--shadow-glow)]"
-            style={{ background: "var(--gradient-primary)" }}
-          >
-            <PenLine className="w-4 h-4" /> Start Brain Dump
-          </Link>
         </div>
       </AppShell>
     );
   }
 
-  const top3 = [...state.tasks]
-    .filter((t) => !t.completed)
-    .sort((a, b) => {
-      const order = { do_now: 0, schedule: 1, delegate: 2, ignore: 3 } as const;
-      if (order[a.quadrant] !== order[b.quadrant]) return order[a.quadrant] - order[b.quadrant];
-      const p = { high: 0, medium: 1, low: 2 } as const;
-      return p[a.priority] - p[b.priority];
-    })
-    .slice(0, 3);
-
   const completed = state.tasks.filter((t) => t.completed).length;
   const total = state.tasks.length;
 
+  const priorityBadgeStyle = (priority: string) => {
+    if (priority === "high")
+      return { background: "var(--badge-high-bg)", color: "var(--badge-high-fg)", borderRadius: "20px", padding: "2px 8px", fontSize: "10px", fontWeight: 600 };
+    if (priority === "medium")
+      return { background: "var(--badge-med-bg)", color: "var(--badge-med-fg)", borderRadius: "20px", padding: "2px 8px", fontSize: "10px", fontWeight: 600 };
+    return { background: "var(--badge-low-bg)", color: "var(--badge-low-fg)", borderRadius: "20px", padding: "2px 8px", fontSize: "10px", fontWeight: 600 };
+  };
+
   return (
     <AppShell>
-      <div className="mx-auto max-w-6xl px-5 py-10 sm:py-14">
-        {/* Carried Over Tasks Alert Banner */}
-        {carriedOverTasks.length > 0 && (
-          <div className="mb-6 rounded-2xl border border-primary/20 bg-primary/5 p-4 flex items-center justify-between gap-4 flex-wrap animate-fade-in">
-            <div className="flex items-center gap-3">
-              <AlertCircle className="w-5 h-5 text-primary shrink-0" />
-              <p className="text-sm font-medium text-foreground">
-                You have {carriedOverTasks.length} task{carriedOverTasks.length > 1 ? "s" : ""} carried over from yesterday — want to review them?
+      <div
+        style={{
+          background: "var(--bg)",
+          minHeight: "calc(100vh - 56px)",
+          padding: "40px 20px 60px",
+        }}
+      >
+        <div className="mx-auto max-w-6xl">
+          {/* ── Morning Commitment Banner ── */}
+          {state.activeCommitment && (
+            <div
+              className="animate-fade-in"
+              style={{
+                marginBottom: "24px",
+                background: "rgba(124, 58, 237, 0.04)",
+                border: "1px dashed rgba(124, 58, 237, 0.3)",
+                borderRadius: "8px",
+                padding: "16px 20px",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: "16px",
+                flexWrap: "wrap",
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+                <span style={{ fontSize: "20px" }}>🎯</span>
+                <div>
+                  <span
+                    style={{
+                      fontSize: "9px",
+                      letterSpacing: "0.15em",
+                      color: "#a78bfa",
+                      textTransform: "uppercase",
+                      fontWeight: 600,
+                    }}
+                  >
+                    Morning Commitment Locked
+                  </span>
+                  <p style={{ fontSize: "14px", color: "var(--text-primary)", fontWeight: 600, marginTop: "2px", margin: 0 }}>
+                    {state.activeCommitment.morning_commitment}
+                  </p>
+                </div>
+              </div>
+              <div style={{ display: "flex", gap: "8px" }}>
+                <button
+                  onClick={() => fulfillCommitment(state.activeCommitment!.id)}
+                  className="btn-primary"
+                  style={{ fontSize: "12px", padding: "6px 14px" }}
+                >
+                  <CheckCircle2 className="w-3.5 h-3.5" /> Started It
+                </button>
+                <button
+                  onClick={() => {
+                    const newCommitment = prompt("Change your morning focus:", state.activeCommitment!.morning_commitment);
+                    if (newCommitment && newCommitment.trim()) {
+                      saveCommitment(newCommitment.trim());
+                    }
+                  }}
+                  className="btn-secondary"
+                  style={{ fontSize: "12px", padding: "6px 14px" }}
+                >
+                  Reschedule
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* ── Carried Over Banner ── */}
+          {carriedOverTasks.length > 0 && (
+            <div
+              className="animate-fade-in"
+              style={{
+                marginBottom: "24px",
+                background: "var(--accent-bg)",
+                border: "1px solid var(--accent-border)",
+                borderRadius: "8px",
+                padding: "12px 16px",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: "16px",
+                flexWrap: "wrap",
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+                <AlertCircle className="w-4 h-4" style={{ color: "var(--accent-light)", flexShrink: 0 }} />
+                <p style={{ fontSize: "13px", color: "var(--text-primary)", fontWeight: 500 }}>
+                  {carriedOverTasks.length} task{carriedOverTasks.length > 1 ? "s" : ""} carried over from yesterday — want to review them?
+                </p>
+              </div>
+              <Link
+                to="/matrix"
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  background: "var(--accent-bg)",
+                  border: "1px solid var(--accent-border)",
+                  color: "var(--accent-light)",
+                  borderRadius: "20px",
+                  padding: "6px 14px",
+                  fontSize: "12px",
+                  fontWeight: 600,
+                  textDecoration: "none",
+                }}
+              >
+                Review in Matrix <ArrowRight className="w-3.5 h-3.5" />
+              </Link>
+            </div>
+          )}
+
+          {/* ── Header ── */}
+          <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", flexWrap: "wrap", gap: "12px", marginBottom: "32px" }}>
+            <div>
+              <h1 style={{ fontSize: "32px", fontWeight: 700, letterSpacing: "-0.03em", color: "var(--text-primary)", margin: 0 }}>Your Dashboard</h1>
+              <p style={{ fontSize: "12px", color: "var(--text-hint)", marginTop: "6px" }}>
+                Last updated {new Date(state.lastUpdated!).toLocaleString()}
               </p>
             </div>
-            <Link
-              to="/matrix"
-              className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3.5 py-1.5 text-xs font-semibold text-primary-foreground hover:bg-primary/95 transition-colors"
-            >
-              Review in Matrix <ArrowRight className="w-3.5 h-3.5" />
+            <Link to="/brain-dump" className="btn-secondary" style={{ fontSize: "12px", padding: "8px 16px" }}>
+              <PenLine className="w-4 h-4" /> New dump
             </Link>
           </div>
-        )}
 
-        <div className="flex items-end justify-between flex-wrap gap-3 mb-8">
-          <div>
-            <h1 className="text-3xl sm:text-4xl font-semibold tracking-tight">Your Dashboard</h1>
-            <p className="text-sm text-muted-foreground mt-1.5">
-              Last updated {new Date(state.lastUpdated!).toLocaleString()}
-            </p>
-          </div>
-          <Link
-            to="/brain-dump"
-            className="inline-flex items-center gap-2 rounded-lg border border-border bg-card px-4 py-2 text-sm font-medium hover:bg-accent"
-          >
-            <PenLine className="w-4 h-4" /> New dump
-          </Link>
-        </div>
-
-        <div className="grid lg:grid-cols-3 gap-5">
-          {/* Mental Load card */}
-          <div className="rounded-2xl border border-border bg-card p-7 shadow-[var(--shadow-soft)] flex flex-col items-center">
-            <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground font-medium">Mental Load</p>
-            <div className="my-5">
-              <MentalLoadGauge score={state.mentalLoadScore} risk={state.mentalLoadRisk} />
-            </div>
-            <p className="text-xs text-muted-foreground text-center leading-relaxed max-w-[240px] mb-6">
-              {state.mentalLoadRisk === "high"
-                ? "High cognitive load. Consider postponing or delegating non-essentials."
-                : state.mentalLoadRisk === "moderate"
-                ? "Moderate load. Build in buffer time and protect deep work blocks."
-                : "Manageable. Keep moving with intention."}
-            </p>
-
-            {/* Sparkline Bar Chart */}
-            {loadHistory.length > 0 && (
-              <div className="w-full border-t border-border/60 pt-6 mt-2 space-y-4">
-                <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground font-semibold">Your Load This Week</p>
-                <div className="flex items-end justify-between h-20 px-2 pt-2">
-                  {sparklineData.map((item, idx) => {
-                    // Height calculation: min 8px, max 64px
-                    const height = item.isPlaceholder ? 8 : Math.max(8, (item.score / 100) * 64);
-                    // Color calculation
-                    let barColor = "bg-muted-foreground/30"; // grey
-                    if (!item.isPlaceholder) {
-                      if (item.score < 40) barColor = "bg-[oklch(0.72_0.17_145)]"; // green
-                      else if (item.score <= 70) barColor = "bg-[oklch(0.75_0.18_60)]"; // amber
-                      else barColor = "bg-[oklch(0.62_0.22_25)]"; // red
-                    }
-
-                    return (
-                      <div key={idx} className="flex flex-col items-center flex-1 group relative">
-                        {/* Tooltip */}
-                        {!item.isPlaceholder && (
-                          <div className="absolute bottom-full mb-2 hidden group-hover:block bg-foreground text-background text-[10px] font-bold rounded px-2 py-1 whitespace-nowrap shadow-md z-10">
-                            Score: {item.score} ({item.dateStr})
-                          </div>
-                        )}
-                        <div
-                          className={cn("w-6 rounded-t transition-all", barColor)}
-                          style={{ height: `${height}px` }}
-                        />
-                        <span className="text-[10px] font-mono text-muted-foreground mt-2 font-medium">
-                          {item.dayLabel}
-                        </span>
-                      </div>
-                    );
-                  })}
-                </div>
-
-                {commentaryText && (
-                  <p className="text-xs leading-relaxed text-muted-foreground italic border-l-2 border-primary/30 pl-3">
-                    {commentaryText}
-                  </p>
-                )}
-              </div>
-            )}
-          </div>
-
-          {/* Next Step — hero card */}
-          <div className="lg:col-span-2 rounded-2xl p-7 text-primary-foreground relative overflow-hidden shadow-[var(--shadow-glow)]" style={{ background: "var(--gradient-primary)" }}>
-            <div className="absolute -right-20 -top-20 w-64 h-64 rounded-full bg-white/10 blur-2xl" />
-            <div className="relative">
-              <div className="flex items-center gap-2 text-xs uppercase tracking-[0.18em] font-medium opacity-80">
-                <Target className="w-4 h-4" /> Smart Next Step
-              </div>
-              <h2 className="mt-4 text-2xl sm:text-3xl font-semibold tracking-tight leading-snug">
-                {state.nextStep?.task}
-              </h2>
-              <p className="mt-4 text-primary-foreground/85 leading-relaxed max-w-xl">
-                {state.nextStep?.reason}
+          {/* ── Top Grid: Gauge + Next Step ── */}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: "20px", marginBottom: "32px" }}>
+            {/* Left Sidebar Column */}
+            <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
+              {/* Mental Load Card */}
+              <div
+                className="dark-card"
+              style={{ padding: "28px", display: "flex", flexDirection: "column", alignItems: "center" }}
+            >
+              <p
+                style={{
+                  fontSize: "9px",
+                  letterSpacing: "0.15em",
+                  color: "var(--text-hint)",
+                  textTransform: "uppercase",
+                  fontWeight: 500,
+                  marginBottom: "20px",
+                }}
+              >
+                MENTAL LOAD
               </p>
-              <div className="mt-6 flex items-center gap-4 flex-wrap">
-                <div className="inline-flex items-center gap-2 rounded-full bg-white/15 px-3.5 py-1.5 text-xs font-medium">
-                  <Clock className="w-3.5 h-3.5" /> ≈ {state.nextStep?.estimatedMinutes} min
+              <MentalLoadGauge score={state.mentalLoadScore} risk={state.mentalLoadRisk} />
+
+              {/* Mood Mode Chip */}
+              {state.moodProfile && (
+                <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "4px" }}>
+                  <div
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: "6px",
+                      background: "rgba(124, 58, 237, 0.08)",
+                      border: "1px solid rgba(124, 58, 237, 0.15)",
+                      borderRadius: "16px",
+                      padding: "5px 12px",
+                      fontSize: "11px",
+                      color: "#a78bfa",
+                      fontWeight: 600,
+                      marginTop: "16px",
+                      cursor: "help"
+                    }}
+                    title={`Emotional State: ${state.moodProfile.emotionalState}\nRecommended Mode: ${state.moodProfile.recommendedMode}\nSignals: ${state.moodProfile.toneSignals.join(", ")}`}
+                  >
+                    <span>🧠 Mode: {state.moodProfile.recommendedMode}</span>
+                  </div>
+                  <div style={{ fontSize: "10px", color: "var(--text-hint)", marginTop: "4px" }}>
+                    COI re-weighted for <span style={{ color: "#a78bfa" }}>{state.moodProfile.emotionalState}</span> state
+                  </div>
                 </div>
-                <Link
-                  to="/matrix"
-                  className="inline-flex items-center gap-2 rounded-lg bg-background text-foreground px-4 py-2 text-sm font-semibold hover:opacity-95"
+              )}
+
+              <p
+                style={{
+                  fontSize: "12px",
+                  color: "var(--text-secondary)",
+                  textAlign: "center",
+                  lineHeight: 1.6,
+                  maxWidth: "220px",
+                  marginTop: "20px",
+                  marginBottom: "24px",
+                }}
+              >
+                {state.mentalLoadRisk === "high"
+                  ? "High cognitive load. Consider postponing or delegating non-essentials."
+                  : state.mentalLoadRisk === "moderate"
+                  ? "Moderate load. Build in buffer time and protect deep work blocks."
+                  : "Manageable. Keep moving with intention."}
+              </p>
+
+              {/* Sparkline */}
+              {loadHistory.length > 0 && (
+                <div style={{ width: "100%", borderTop: "1px solid var(--divider)", paddingTop: "20px" }}>
+                  <p
+                    style={{
+                      fontSize: "9px",
+                      letterSpacing: "0.15em",
+                      color: "var(--text-hint)",
+                      textTransform: "uppercase",
+                      fontWeight: 500,
+                      marginBottom: "12px",
+                    }}
+                  >
+                    YOUR LOAD THIS WEEK
+                  </p>
+                  <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", height: "64px", gap: "4px" }}>
+                    {sparklineData.map((item, idx) => {
+                      const isToday = idx === sparklineData.length - 1 && !item.isPlaceholder;
+                      const height = item.isPlaceholder ? 8 : Math.max(8, (item.score / 100) * 56);
+                      return (
+                        <div key={idx} style={{ display: "flex", flexDirection: "column", alignItems: "center", flex: 1, gap: "4px", position: "relative" }}>
+                          <div
+                            title={!item.isPlaceholder ? `Score: ${item.score} (${item.dateStr})` : "No data"}
+                            style={{
+                              width: "100%",
+                              maxWidth: "24px",
+                              borderRadius: "3px 3px 0 0",
+                              height: `${height}px`,
+                              background: item.isPlaceholder
+                                ? "var(--gauge-track)"
+                                : isToday
+                                ? "var(--sparkline-today)"
+                                : "var(--sparkline-bar)",
+                              transition: "height 0.3s",
+                            }}
+                          />
+                          <span style={{ fontSize: "9px", color: "var(--text-hint)", fontFamily: "monospace" }}>
+                            {item.dayLabel}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  {commentaryText && (
+                    <p
+                      style={{
+                        fontSize: "11px",
+                        color: "var(--text-muted)",
+                        lineHeight: 1.6,
+                        borderLeft: "2px solid var(--tm-accent)",
+                        paddingLeft: "10px",
+                        marginTop: "12px",
+                        fontStyle: "italic",
+                      }}
+                    >
+                      {commentaryText}
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Momentum Streak Sidebar Card */}
+            <div
+              className="dark-card"
+              style={{ padding: "24px", display: "flex", flexDirection: "column", gap: "16px" }}
+            >
+              <p
+                style={{
+                  fontSize: "9px",
+                  letterSpacing: "0.15em",
+                  color: "var(--text-hint)",
+                  textTransform: "uppercase",
+                  fontWeight: 500,
+                  margin: 0
+                }}
+              >
+                Momentum Streak
+              </p>
+              
+              <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+                <span style={{ fontSize: "32px" }}>
+                  {state.streak && state.streak.current_streak > 0 ? "🔥" : "⚡"}
+                </span>
+                <div>
+                  <h4 style={{ fontSize: "20px", fontWeight: 700, color: "var(--text-primary)", margin: 0 }}>
+                    {state.streak ? state.streak.current_streak : 0} Day Streak
+                  </h4>
+                  <p style={{ fontSize: "11px", color: "var(--text-muted)", margin: 0 }}>
+                    Longest Streak: {state.streak ? state.streak.longest_streak : 0} days
+                  </p>
+                </div>
+              </div>
+
+              {/* Progress Bar towards next milestone */}
+              {(() => {
+                const current = state.streak ? state.streak.current_streak : 0;
+                const milestones = [3, 7, 14, 21, 30, 60, 100];
+                const nextMilestone = milestones.find(m => m > current) || 100;
+                const prevMilestone = [...milestones].reverse().find(m => m <= current) || 0;
+                const totalRange = nextMilestone - prevMilestone;
+                const progressInRange = current - prevMilestone;
+                const percent = Math.min(100, Math.round((progressInRange / totalRange) * 100));
+
+                return (
+                  <div style={{ marginTop: "4px" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11px", color: "var(--text-secondary)", marginBottom: "4px" }}>
+                      <span>Milestone Progress</span>
+                      <span>{current} / {nextMilestone} days</span>
+                    </div>
+                    <div style={{ width: "100%", height: "6px", background: "var(--gauge-track)", borderRadius: "3px", overflow: "hidden" }}>
+                      <div style={{ width: `${percent}%`, height: "100%", background: "linear-gradient(90deg, #7c3aed, #ec4899)", borderRadius: "3px" }} />
+                    </div>
+                    <p style={{ fontSize: "10px", color: "var(--text-muted)", marginTop: "6px", fontStyle: "italic", margin: 0 }}>
+                      {nextMilestone - current} days until your next milestone reward!
+                    </p>
+                  </div>
+                );
+              })()}
+            </div>
+          </div>
+
+          {/* Smart Next Step Card */}
+            <div
+              style={{
+                background: "var(--accent-bg)",
+                border: "1px solid var(--accent-border)",
+                borderRadius: "12px",
+                padding: "28px",
+                position: "relative",
+                overflow: "hidden",
+              }}
+            >
+              <div
+                style={{
+                  position: "absolute",
+                  right: "-60px",
+                  top: "-60px",
+                  width: "200px",
+                  height: "200px",
+                  borderRadius: "50%",
+                  background: "var(--orb-glow-2)",
+                  filter: "blur(40px)",
+                }}
+              />
+              <div style={{ position: "relative" }}>
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "8px",
+                    fontSize: "9px",
+                    letterSpacing: "0.15em",
+                    color: "var(--accent-light)",
+                    textTransform: "uppercase",
+                    fontWeight: 500,
+                    marginBottom: "16px",
+                  }}
                 >
-                  See full matrix <ArrowRight className="w-4 h-4" />
-                </Link>
+                  <Target className="w-3.5 h-3.5" />
+                  SMART NEXT STEP
+                </div>
+                <h2
+                  style={{
+                    fontSize: "22px",
+                    fontWeight: 700,
+                    color: "var(--text-primary)",
+                    letterSpacing: "-0.02em",
+                    lineHeight: 1.2,
+                    marginBottom: "16px",
+                  }}
+                >
+                  {state.nextStep?.task}
+                </h2>
+                <p style={{ fontSize: "13px", color: "var(--text-secondary)", lineHeight: 1.7, marginBottom: "24px" }}>
+                  {state.nextStep?.reason}
+                </p>
+                <div style={{ display: "flex", alignItems: "center", gap: "12px", flexWrap: "wrap" }}>
+                  <span
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: "6px",
+                      background: "var(--accent-bg)",
+                      color: "var(--accent-light)",
+                      borderRadius: "20px",
+                      padding: "5px 12px",
+                      fontSize: "11px",
+                      fontWeight: 500,
+                    }}
+                  >
+                    <Clock className="w-3.5 h-3.5" /> ≈ {state.nextStep?.estimatedMinutes} min
+                  </span>
+                  <Link
+                    to="/matrix"
+                    className="btn-secondary"
+                    style={{ fontSize: "12px", padding: "5px 16px" }}
+                  >
+                    See full matrix →
+                  </Link>
+                </div>
               </div>
             </div>
           </div>
-        </div>
 
-        {/* Top 3 */}
-        <div className="mt-10">
-          <div className="flex items-end justify-between mb-4">
-            <h2 className="text-xl font-semibold tracking-tight">Today's Top 3</h2>
-            <span className="font-mono text-xs text-muted-foreground tabular-nums">{completed}/{total} done</span>
-          </div>
-          <div className="grid sm:grid-cols-3 gap-4">
+          {/* ── Today's Top 3 ── */}
+          <div style={{ marginBottom: "32px" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "16px" }}>
+              <h2 style={{ fontSize: "16px", fontWeight: 700, color: "var(--text-primary)" }}>Today's Top 3</h2>
+              <span style={{ fontSize: "11px", color: "var(--text-hint)", fontFamily: "monospace" }}>
+                {completed}/{total} done
+              </span>
+            </div>
+
             {top3.length === 0 ? (
-              <div className="sm:col-span-3 rounded-xl border border-dashed border-border bg-card/50 p-8 text-center text-muted-foreground">
+              <div
+                style={{
+                  padding: "32px",
+                  textAlign: "center",
+                  fontSize: "13px",
+                  color: "var(--text-hint)",
+                  border: "1px dashed var(--border-card)",
+                  borderRadius: "12px",
+                }}
+              >
                 Nothing left in your top 3. Beautiful.
               </div>
             ) : (
-              top3.map((t, i) => {
-                const q = QUADRANTS[t.quadrant];
-                return (
-                  <div key={t.id} className="rounded-xl border border-border bg-card p-5 flex flex-col gap-3">
-                    <div className="flex items-start justify-between gap-2">
-                      <span className="font-mono text-xs text-primary">#{String(i + 1).padStart(2, "0")}</span>
-                      <span
-                        className="text-[10px] uppercase tracking-wider font-semibold px-2 py-0.5 rounded"
-                        style={{ background: `var(--color-${q.tone})`, color: q.tone === "muted" ? "var(--color-foreground)" : "white" }}
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: "16px" }}>
+                {top3.map((t, i) => {
+                  const q = QUADRANTS[t.quadrant];
+                  return (
+                    <div
+                      key={t.id}
+                      className="dark-card"
+                      style={{ padding: "20px", display: "flex", flexDirection: "column", gap: "12px" }}
+                    >
+                      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "8px" }}>
+                        <span style={{ fontFamily: "monospace", fontSize: "10px", color: "var(--accent-light)" }}>
+                          #{String(i + 1).padStart(2, "0")}
+                        </span>
+                        <span style={priorityBadgeStyle(t.priority)}>{t.priority}</span>
+                      </div>
+                      <p
+                        style={{
+                          fontSize: "14px",
+                          color: t.completed ? "var(--text-muted)" : "var(--text-primary)",
+                          textDecoration: t.completed ? "line-through" : "none",
+                          lineHeight: 1.4,
+                          fontWeight: 500,
+                        }}
                       >
-                        {q.label}
-                      </span>
-                    </div>
-                    <p className="text-sm font-medium leading-snug">{t.title}</p>
-                    {t.deadline && <p className="text-xs text-muted-foreground">Due: {t.deadline}</p>}
-                    <div className="mt-auto flex items-center justify-between text-xs text-muted-foreground">
-                      <span className="font-mono tabular-nums">{t.estimatedMinutes} min</span>
-                      <button
-                        onClick={() => toggleTask(t.id)}
-                        className={cn("inline-flex items-center gap-1.5 font-medium", t.completed ? "text-success" : "hover:text-foreground")}
-                      >
-                        {t.completed ? <CheckCircle2 className="w-4 h-4" /> : <Circle className="w-4 h-4" />}
-                        Done
-                      </button>
-                    </div>
-                  </div>
-                );
-              })
-            )}
-          </div>
-        </div>
-
-        {/* Collapsible Rationale Section */}
-        {sessionContext && sessionContext.classificationExplanations && sessionContext.classificationExplanations.length > 0 && (
-          <div className="mt-10 rounded-2xl border border-border bg-card overflow-hidden">
-            <button
-              onClick={toggleExplain}
-              className="w-full flex items-center justify-between p-5 text-left font-semibold hover:bg-accent/40 transition-colors"
-            >
-              <span className="text-base tracking-tight flex items-center gap-2">
-                <Sparkles className="w-4 h-4 text-primary" /> Rationale: Why ThinkMate classified your tasks
-              </span>
-              {explainExpanded ? <ChevronUp className="w-5 h-5 text-muted-foreground" /> : <ChevronDown className="w-5 h-5 text-muted-foreground" />}
-            </button>
-
-            {explainExpanded && (
-              <div className="border-t border-border p-5 space-y-4 bg-muted/10 animate-slide-up">
-                {sessionContext.sessionSummary && (
-                  <div className="rounded-xl bg-muted/40 p-4 border border-border/50">
-                    <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">Session Context Summary</p>
-                    <p className="text-sm leading-relaxed text-foreground">{sessionContext.sessionSummary}</p>
-                  </div>
-                )}
-                <div className="space-y-3">
-                  {sessionContext.classificationExplanations.map((item, idx) => {
-                    const q = QUADRANTS[item.quadrant];
-                    return (
-                      <div key={idx} className="flex items-start gap-3 p-3.5 rounded-xl border border-border/50 bg-background text-sm">
-                        <span
-                          className="text-[9px] uppercase tracking-wider font-bold px-1.5 py-0.5 rounded shrink-0 mt-0.5"
+                        {t.title}
+                      </p>
+                      {t.deadline && (
+                        <p style={{ fontSize: "11px", color: "var(--text-muted)", margin: 0 }}>Due: {t.deadline}</p>
+                      )}
+                      {t.is_procrastination_trigger && (
+                        <div
                           style={{
-                            background: `var(--color-${q.tone})`,
-                            color: q.tone === "muted" ? "var(--color-foreground)" : "white",
+                            background: "rgba(245, 158, 11, 0.04)",
+                            border: "1px solid rgba(245, 158, 11, 0.15)",
+                            borderRadius: "8px",
+                            padding: "10px 12px",
+                            marginTop: "4px",
+                            fontSize: "12px",
+                            display: "flex",
+                            flexDirection: "column",
+                            gap: "6px"
                           }}
                         >
-                          {q.label}
-                        </span>
-                        <div>
-                          <p className="font-semibold text-foreground">{item.taskTitle}</p>
-                          <p className="text-xs text-muted-foreground mt-1 leading-relaxed">{item.reason}</p>
+                          <div style={{ display: "flex", alignItems: "center", gap: "6px", color: "#fbbf24", fontWeight: 600 }}>
+                            <span>⚠️</span> Postponed {t.postpone_count || 1}x
+                          </div>
+                          {t.blocker_question && (
+                            <p style={{ color: "var(--text-secondary)", fontStyle: "italic", margin: 0, lineHeight: 1.4 }}>
+                              "{t.blocker_question}"
+                            </p>
+                          )}
+                          <div style={{ display: "flex", gap: "8px", alignItems: "center", borderTop: "1px solid rgba(255,255,255,0.05)", paddingTop: "6px", marginTop: "2px" }}>
+                            <button
+                              onClick={() => snoozeTask(t.id, 3)}
+                              style={{ fontSize: "10px", color: "var(--text-muted)", background: "none", border: "none", cursor: "pointer", padding: 0 }}
+                              className="hover:underline hover:text-[var(--text-primary)]"
+                            >
+                              Snooze 3h
+                            </button>
+                            <span style={{ color: "rgba(255,255,255,0.15)", fontSize: "10px" }}>•</span>
+                            <button
+                              onClick={() => snoozeTask(t.id, 24)}
+                              style={{ fontSize: "10px", color: "var(--text-muted)", background: "none", border: "none", cursor: "pointer", padding: 0 }}
+                              className="hover:underline hover:text-[var(--text-primary)]"
+                            >
+                              Snooze 1d
+                            </button>
+                            <span style={{ color: "rgba(255,255,255,0.15)", fontSize: "10px" }}>•</span>
+                            <Link
+                              to="/goals"
+                              style={{ fontSize: "10px", color: "var(--accent-light)", textDecoration: "none" }}
+                              className="hover:underline"
+                            >
+                              Break down
+                            </Link>
+                          </div>
                         </div>
+                      )}
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: "auto", borderTop: "1px solid var(--divider)", paddingTop: "12px" }}>
+                        <span style={{ fontSize: "11px", color: "var(--text-muted)", fontFamily: "monospace" }}>
+                          {t.estimatedMinutes} min
+                        </span>
+                        <button
+                          onClick={() => toggleTask(t.id)}
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: "6px",
+                            fontSize: "12px",
+                            fontWeight: 500,
+                            color: t.completed ? "var(--success)" : "var(--text-secondary)",
+                            background: "none",
+                            border: "none",
+                            cursor: "pointer",
+                            transition: "color 0.15s",
+                          }}
+                        >
+                          {t.completed ? <CheckCircle2 className="w-4 h-4" /> : <Circle className="w-4 h-4" />}
+                          Done
+                        </button>
                       </div>
-                    );
-                  })}
-                </div>
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>
-        )}
 
-        {/* Recommendation */}
-        {state.recommendation && (
-          <div className="mt-10 rounded-2xl border border-primary/20 bg-primary/5 p-6">
-            <div className="flex items-start gap-3">
-              <Sparkles className="w-5 h-5 text-primary mt-0.5 shrink-0" />
-              <div>
-                <p className="text-xs uppercase tracking-[0.18em] text-primary font-semibold">ThinkMate says</p>
-                <p className="mt-2 text-sm leading-relaxed text-foreground">{state.recommendation}</p>
+          {/* ── AI Rationale Panel ── */}
+          {sessionContext && sessionContext.classificationExplanations && sessionContext.classificationExplanations.length > 0 && (
+            <div
+              style={{
+                borderRadius: "12px",
+                border: "1px solid var(--border-card)",
+                overflow: "hidden",
+                marginBottom: "24px",
+              }}
+            >
+              <button
+                onClick={toggleExplain}
+                style={{
+                  width: "100%",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  padding: "18px 20px",
+                  background: "transparent",
+                  border: "none",
+                  cursor: "pointer",
+                  color: "var(--text-primary)",
+                  textAlign: "left",
+                  transition: "background 0.15s",
+                }}
+                onMouseEnter={(e) => (e.currentTarget.style.background = "var(--bg-card)")}
+                onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+              >
+                <span style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "14px", fontWeight: 600 }}>
+                  <Sparkles className="w-4 h-4" style={{ color: "var(--accent-light)" }} />
+                  Rationale: Why ThinkMate classified your tasks
+                </span>
+                {explainExpanded ? (
+                  <ChevronUp className="w-5 h-5" style={{ color: "var(--text-hint)" }} />
+                ) : (
+                  <ChevronDown className="w-5 h-5" style={{ color: "var(--text-hint)" }} />
+                )}
+              </button>
+
+              {explainExpanded && (
+                <div
+                  className="animate-slide-up"
+                  style={{
+                    borderTop: "1px solid var(--divider)",
+                    padding: "20px",
+                    background: "var(--bg-input)",
+                  }}
+                >
+                  {sessionContext.sessionSummary && (
+                    <div
+                      style={{
+                        background: "var(--bg-card)",
+                        border: "1px solid var(--border-card)",
+                        borderRadius: "8px",
+                        padding: "16px",
+                        marginBottom: "16px",
+                      }}
+                    >
+                      <p
+                        style={{
+                          fontSize: "9px",
+                          letterSpacing: "0.15em",
+                          color: "var(--text-hint)",
+                          textTransform: "uppercase",
+                          fontWeight: 500,
+                          marginBottom: "8px",
+                        }}
+                      >
+                        Session Context Summary
+                      </p>
+                      <p style={{ fontSize: "13px", color: "var(--text-secondary)", lineHeight: 1.6 }}>
+                        {sessionContext.sessionSummary}
+                      </p>
+                    </div>
+                  )}
+                  <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                    {sessionContext.classificationExplanations.map((item, idx) => {
+                      const q = QUADRANTS[item.quadrant];
+                      return (
+                        <div
+                          key={idx}
+                          style={{
+                            display: "flex",
+                            alignItems: "flex-start",
+                            gap: "12px",
+                            padding: "14px",
+                            borderRadius: "8px",
+                            border: "1px solid var(--border-card)",
+                            background: "var(--bg)",
+                          }}
+                        >
+                          <span
+                            style={{
+                              fontSize: "9px",
+                              textTransform: "uppercase",
+                              letterSpacing: "0.1em",
+                              fontWeight: 700,
+                              padding: "2px 6px",
+                              borderRadius: "4px",
+                              background: "var(--accent-bg)",
+                              color: "var(--accent-light)",
+                              flexShrink: 0,
+                              marginTop: "2px",
+                            }}
+                          >
+                            {q.label}
+                          </span>
+                          <div>
+                            <p style={{ fontSize: "13px", fontWeight: 600, color: "var(--text-primary)" }}>{item.taskTitle}</p>
+                            <p style={{ fontSize: "12px", color: "var(--text-secondary)", lineHeight: 1.6, marginTop: "4px" }}>
+                              {item.reason}
+                            </p>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ── ThinkMate Says ── */}
+          {state.recommendation && (
+            <div
+              style={{
+                background: "var(--accent-bg)",
+                border: "1px solid var(--accent-border)",
+                borderRadius: "12px",
+                padding: "20px 24px",
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "flex-start", gap: "12px" }}>
+                <Sparkles className="w-5 h-5" style={{ color: "var(--accent-light)", marginTop: "2px", flexShrink: 0 }} />
+                <div>
+                  <p
+                    style={{
+                      fontSize: "9px",
+                      letterSpacing: "0.15em",
+                      color: "var(--accent-light)",
+                      textTransform: "uppercase",
+                      fontWeight: 500,
+                      marginBottom: "8px",
+                    }}
+                  >
+                    ThinkMate says
+                  </p>
+                  <p style={{ fontSize: "13px", color: "var(--text-secondary)", lineHeight: 1.7 }}>
+                    {state.recommendation}
+                  </p>
+                </div>
               </div>
             </div>
-          </div>
-        )}
+          )}
+        </div>
       </div>
     </AppShell>
   );
